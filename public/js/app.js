@@ -1,25 +1,25 @@
-
 window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file:" ? "http://localhost:3000" : "");
-  window.__activeStatMode = "all";
-  window.__allIdentityRecords = [];
-  window.__militaryFilterActive = false;
+window.__activeStatMode = "all";
+window.__allIdentityRecords = [];
+window.__militaryFilterActive = false;
 
-  window.__authDebugCatcher = true;
-  window.addEventListener("error", (ev) => {
-    console.error("GLOBAL_ERR:", ev.message, ev.filename, ev.lineno);
-    if (typeof showToast === "function") {
-      showToast("خطأ برمجي: " + (ev.message || "غير معروف"), "error");
-    }
-  });
-  window.addEventListener("unhandledrejection", (ev) => {
-    const msg = ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason || "");
-    console.error("PROMISE_ERR:", msg);
-    if (typeof showToast === "function") {
-      showToast("خطأ غير متوقع: " + msg, "error");
-    }
-  });
+window.__authDebugCatcher = true;
+window.addEventListener("error", (ev) => {
+  console.error("GLOBAL_ERR:", ev.message, ev.filename, ev.lineno);
+  if (typeof showToast === "function") {
+    showToast("خطأ برمجي: " + (ev.message || "غير معروف"), "error");
+  }
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  const msg = ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason || "");
+  console.error("PROMISE_ERR:", msg);
+  if (typeof showToast === "function") {
+    showToast("خطأ غير متوقع: " + msg, "error");
+  }
+});
 
-  window.__recordStatusMap = new Map();
+window.__recordStatusMap = new Map();
+
 (() => {
   let currentUser = null;
   let tempRecordImage = '';
@@ -33,7 +33,6 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     logo_data: ''
   };
 
-  
   window.__copyFieldValue = async (val, label) => {
     if (!val) return;
     const text = String(val);
@@ -57,7 +56,6 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     }
   };
 
-  
   (function injectStatCardStyles() {
     if (document.getElementById("statCardAnimationStyle")) return;
     const style = document.createElement("style");
@@ -92,13 +90,63 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     const colors = {
       info: 'bg-slate-900 text-white',
       success: 'bg-emerald-600 text-white',
-      error: 'bg-rose-600 text-white'
+      error: 'bg-rose-600 text-white',
+      warning: 'bg-amber-600 text-white'
     };
     el.className = `px-4 py-3 rounded-2xl shadow-lg text-sm font-bold pointer-events-auto ${colors[type] || colors.info}`;
     el.textContent = message;
     container.appendChild(el);
-    setTimeout(() => el.remove(), 3200);
+    setTimeout(() => el.remove(), 3500);
   }
+  window.showToast = showToast;
+
+  // دالة موحدة لتحميل أو مشاركة الملفات في المتصفح وتطبيق الأندرويد WebView
+  async function saveOrShareFile(blob, filename, mimeType) {
+    try {
+      const file = new File([blob], filename, { type: mimeType });
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        await navigator.share({
+          files: [file],
+          title: filename
+        });
+        showToast(`تم تجهيز ومشاركة الملف: ${filename}`, "success");
+        return true;
+      }
+    } catch (shareErr) {
+      if (shareErr && shareErr.name === "AbortError") return false;
+    }
+
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1500);
+      showToast(`تم حفظ الملف في التنزيلات (Downloads): ${filename}`, "success");
+      return true;
+    } catch {
+      // بديل Data URL لـ WebView
+      const reader = new FileReader();
+      reader.onload = () => {
+        const a = document.createElement("a");
+        a.href = reader.result;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast(`تم تنزيل الملف: ${filename}`, "success");
+      };
+      reader.readAsDataURL(blob);
+      return true;
+    }
+  }
+  window.__saveOrShareFile = saveOrShareFile;
 
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -126,17 +174,42 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     }
   }
 
+  function triggerNativeCameraInput(mode = 'scan') {
+    const fallbackInput = mode === 'record'
+      ? document.getElementById('recordImageInput')
+      : document.getElementById('scanFileInput');
+    if (!fallbackInput) return;
+    fallbackInput.setAttribute('accept', 'image/*');
+    fallbackInput.setAttribute('capture', 'environment');
+    fallbackInput.click();
+  }
+
   async function startLiveCamera(mode = 'scan') {
     cameraTargetMode = mode;
     const box = document.getElementById('liveCameraBox');
     const video = document.getElementById('liveCameraVideo');
-    if (!box || !video) return;
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const fallbackInput = mode === 'record'
-        ? document.getElementById('recordImageInput')
-        : document.getElementById('scanFileInput');
-      fallbackInput?.click();
+    // محاولة استخدام كاميرا Capacitor الأصلية إذا كانت متوفرة
+    try {
+      const capCam = window.Capacitor?.Plugins?.Camera;
+      if (capCam && typeof capCam.getPhoto === 'function') {
+        const photo = await capCam.getPhoto({
+          quality: 90,
+          allowEditing: false,
+          resultType: 'dataUrl',
+          source: 'CAMERA'
+        });
+        if (photo && photo.dataUrl) {
+          await handleCapturedImageDataUrl(photo.dataUrl, mode === 'scan');
+          return;
+        }
+      }
+    } catch (capErr) {
+      if (String(capErr?.message || '').toLowerCase().includes('cancel')) return;
+    }
+
+    if (!box || !video || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      triggerNativeCameraInput(mode);
       return;
     }
 
@@ -158,14 +231,15 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
           scanAnchor.parentElement.insertBefore(box, scanAnchor);
         }
       }
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('autoplay', 'true');
+      video.muted = true;
       video.srcObject = liveCameraStream;
       box.classList.remove('hidden');
       await video.play();
     } catch {
-      const fallbackInput = mode === 'record'
-        ? document.getElementById('recordImageInput')
-        : document.getElementById('scanFileInput');
-      fallbackInput?.click();
+      showToast("تعذر فتح البث المباشر، يتم فتح كاميرا الهاتف...", "info");
+      triggerNativeCameraInput(mode);
     }
   }
 
@@ -340,11 +414,61 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     return { label: 'سارية', cls: 'bg-emerald-100 text-emerald-700' };
   }
 
+  // دالة موحدة للتحقق هل السجل "عسكري بهوية مدنية"
+  window.__isRecordMilitaryCivil = function(r) {
+    if (!r || typeof r !== 'object') return false;
+    const st = String(r.military_status || '').trim();
+    const dt = String(r.doc_type || '').trim();
+    const isMil = st === 'عسكري' || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
+    const hasCivilDoc = dt && !/عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
+    return isMil && hasCivilDoc;
+  };
+
+  window.__getFilteredRecordsList = function(sourceRecords) {
+    const records = Array.isArray(sourceRecords) ? sourceRecords : (window.__allIdentityRecords || []);
+    const q = (document.getElementById('searchQuery')?.value || '').trim().toLowerCase();
+    const phoneQ = (document.getElementById('searchPhone')?.value || '').trim();
+    const typeSel = document.getElementById('filterDocType');
+    const typeQ = (typeSel?.value || '').trim();
+    const typeLabel = (typeSel?.selectedOptions?.[0]?.textContent || '').trim();
+    const quickMilCivilBtn = document.getElementById('quickFilterMilCivilBtn');
+    const isQuickMilCivil = quickMilCivilBtn && quickMilCivilBtn.dataset.active === '1';
+    const isDropdownMilCivil = typeQ === '__mil_civil_doc__' || /عسكري.*هوية\s*مدنية/i.test(typeQ + ' ' + typeLabel);
+
+    const __nowRef = new Date();
+    __nowRef.setHours(0, 0, 0, 0);
+
+    return records.filter((r) => {
+      const mode = window.__activeStatMode || "all";
+      if (mode === "military") {
+        if (r.military_status !== "عسكري") return false;
+      } else if (mode === "expiring") {
+        if (!r.expiry_date) return false;
+        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
+        if (!(diff >= 0 && diff <= 30)) return false;
+      } else if (mode === "expired") {
+        if (!r.expiry_date) return false;
+        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
+        if (!(diff < 0)) return false;
+      }
+      if (window.__militaryFilterActive && r.military_status !== "عسكري") {
+        return false;
+      }
+      if (isQuickMilCivil || isDropdownMilCivil) {
+        if (!window.__isRecordMilitaryCivil(r)) return false;
+      } else if (typeQ) {
+        if (String(r.doc_type || '').trim() !== typeQ) return false;
+      }
+      const matchText = !q ||
+        String(r.full_name || '').toLowerCase().includes(q) ||
+        String(r.doc_number || '').toLowerCase().includes(q);
+      const matchPhone = !phoneQ || String(r.phone || '').includes(phoneQ);
+      return matchText && matchPhone;
+    });
+  };
+
   async function renderAll() {
     const records = await IDVaultDB.getAll('identity_records');
-    const q = (document.getElementById('searchQuery').value || '').trim().toLowerCase();
-    const phoneQ = (document.getElementById('searchPhone').value || '').trim();
-    const typeQ = document.getElementById('filterDocType').value;
 
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -375,34 +499,7 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     document.getElementById('statExpired').textContent = expiredCount;
 
     window.__allIdentityRecords = Array.isArray(records) ? records.slice() : [];
-    window.__allIdentityRecords = Array.isArray(records) ? records.slice() : [];
-    const __nowRef = new Date();
-    __nowRef.setHours(0, 0, 0, 0);
-    const filtered = records.filter((r) => {
-      const mode = window.__activeStatMode || "all";
-      if (mode === "military") {
-        if (r.military_status !== "عسكري") return false;
-      } else if (mode === "expiring") {
-        if (!r.expiry_date) return false;
-        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
-        if (!(diff >= 0 && diff <= 30)) return false;
-      } else if (mode === "expired") {
-        if (!r.expiry_date) return false;
-        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
-        if (!(diff < 0)) return false;
-      }
-      if (window.__militaryFilterActive && r.military_status !== "عسكري") {
-        return false;
-      }
-      const matchText = !q ||
-        String(r.full_name || '').toLowerCase().includes(q) ||
-        String(r.doc_number || '').toLowerCase().includes(q);
-      const matchPhone = !phoneQ || String(r.phone || '').includes(phoneQ);
-      const matchType = !typeQ || r.doc_type === typeQ;
-      return matchText && matchPhone && matchType;
-    
-    
-    });
+    const filtered = window.__getFilteredRecordsList(records);
 
     const tbody = document.getElementById('recordsTableBody');
     const canWrite = currentUser.role === 'admin' || currentUser.role === 'writer';
@@ -441,14 +538,17 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
       await renderAudit();
     }
   }
+  window.__renderAllRecords = renderAll;
 
   function renderAnalytics(records) {
     const types = ['بطاقة شخصية إلكترونية', 'بطاقة شخصية قديمة', 'جواز سفر', 'بطاقة عسكرية'];
     const total = records.length || 1;
     const container = document.getElementById('typeDistributionBars');
-    container.innerHTML = types.map((t) => {
-      const count = records.filter((r) => r.doc_type === t).length;
-      const pct = Math.round((count / total) * 100);
+    if (!container) return;
+
+    const standardBars = types.map((t) => {
+      const count = records.filter((r) => String(r.doc_type || '').trim() === t).length;
+      const pct = records.length > 0 ? Math.round((count / total) * 100) : 0;
       return `
         <div>
           <div class="flex justify-between text-xs font-bold text-slate-700 mb-1.5">
@@ -461,6 +561,22 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
         </div>
       `;
     }).join('');
+
+    const milCivilCount = records.filter((r) => window.__isRecordMilitaryCivil(r)).length;
+    const milCivilPct = records.length > 0 ? Math.round((milCivilCount / total) * 100) : 0;
+    const milCivilBar = `
+      <div class="pt-2 border-t border-slate-100">
+        <div class="flex justify-between text-xs font-bold text-rose-700 mb-1.5">
+          <span>عسكري بهوية مدنية</span>
+          <span>${milCivilCount} (${milCivilPct}%)</span>
+        </div>
+        <div class="w-full h-2.5 bg-rose-100 rounded-full overflow-hidden">
+          <div class="h-full bg-rose-600 rounded-full" style="width:${milCivilPct}%"></div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = standardBars + milCivilBar;
   }
 
   async function renderUsers() {
@@ -554,35 +670,6 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
         </div>
       `;
       openModal('viewModal');
-      const quickImgInput = document.getElementById('quickAttachImageInput');
-      quickImgInput?.addEventListener('change', async (ev) => {
-        const file = ev.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const dataUrl = String(reader.result || "");
-          if (!dataUrl) return;
-          try {
-            await IDVaultDB.update('identity_records', { ...r, doc_image_data: dataUrl });
-            r.doc_image_data = dataUrl;
-            showToast("تم حفظ صورة البطاقة بنجاح", "success");
-            await renderAll();
-            const bodyEl = document.getElementById('viewModalBody');
-            const existingImg = bodyEl?.querySelector("#quickViewImg");
-            if (existingImg) {
-              existingImg.src = dataUrl;
-            } else {
-              const emptyBox = bodyEl?.querySelector("#quickViewEmptyImg");
-              if (emptyBox) {
-                emptyBox.outerHTML = `<img id="quickViewImg" src="${dataUrl}" alt="" class="w-full max-h-60 object-contain rounded-2xl bg-slate-50 border border-slate-200" />`;
-              }
-            }
-          } catch (err) {
-            showToast(err?.message || "تعذر حفظ صورة البطاقة", "error");
-          }
-        };
-        reader.readAsDataURL(file);
-      });
     },
     async editRecord(id) {
       const r = await IDVaultDB.getById('identity_records', id);
@@ -640,9 +727,61 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     }
   };
 
+  function mapRecordsToExportRows(recordsList) {
+    return (recordsList || []).map((r) => ({
+      "الاسم الكامل": r.full_name || "",
+      "نوع الهوية": r.doc_type || "بطاقة شخصية إلكترونية",
+      "رقم الهوية": r.doc_number || "",
+      "تاريخ الميلاد": r.birth_date || "",
+      "محل الميلاد": r.birth_place || "",
+      "تاريخ الإصدار": r.issue_date || "",
+      "تاريخ الانتهاء": r.expiry_date || "",
+      "المهنة": r.profession || "",
+      "رقم الهاتف": r.phone || "",
+      "العنوان": r.address || "",
+      "الحالة العسكرية": r.military_status || "مدني",
+      "الرتبة العسكرية": r.military_rank || "",
+      "الرقم العسكري": r.military_number || "",
+      "مكان الوجهة": r.destination_place || "",
+      "سبب الوجهة": r.destination_reason || ""
+    }));
+  }
+
+  async function exportRecordsToExcelFile(recordsList, filePrefix) {
+    const list = Array.isArray(recordsList) ? recordsList : [];
+    if (!list.length) {
+      showToast("لا توجد سجلات لتصديرها", "warning");
+      return;
+    }
+    const rows = mapRecordsToExportRows(list);
+    if (typeof XLSX !== "undefined") {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "الوثائق");
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      await saveOrShareFile(blob, `${filePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    } else {
+      const headers = Object.keys(rows[0]);
+      const csvRows = [headers.join(",")];
+      for (const row of rows) {
+        csvRows.push(headers.map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`).join(","));
+      }
+      const bom = String.fromCharCode(0xFEFF);
+      const blob = new Blob([bom + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+      await saveOrShareFile(blob, `${filePrefix}_${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8;");
+    }
+  }
+  window.__exportFilteredRecordsNow = async () => {
+    const all = window.__allIdentityRecords.length ? window.__allIdentityRecords : await IDVaultDB.getAll('identity_records');
+    const filtered = window.__getFilteredRecordsList(all);
+    await exportRecordsToExcelFile(filtered, "identity_filtered");
+  };
+
   async function enterMainApp(session) {
     if (!session) return;
     currentUser = session;
+    window.currentUser = session;
     try {
       sessionStorage.setItem('idvault_session', JSON.stringify(session));
       localStorage.setItem('idvault_session_backup', JSON.stringify(session));
@@ -659,9 +798,7 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     if (shellEl) shellEl.classList.remove('hidden');
 
     try {
-      if (typeof applyRolePermissions === "function") {
-        applyRolePermissions(currentUser);
-      }
+      applyRolePermissions(currentUser);
     } catch (err) {
       console.error("applyRolePermissions error:", err);
     }
@@ -675,14 +812,10 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     }
 
     try {
-      if (typeof renderAll === "function") {
-        await renderAll();
-      }
+      await renderAll();
     } catch (err) {
       console.error("renderAll error:", err);
-      if (typeof showToast === "function") {
-        showToast("تم الدخول، وحدث تنبيه أثناء تحميل بعض البيانات", "info");
-      }
+      showToast("تم الدخول، وحدث تنبيه أثناء تحميل بعض البيانات", "info");
     }
   }
 
@@ -711,6 +844,7 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
       await stopLiveCamera();
       AuthModule.logout();
       currentUser = null;
+      window.currentUser = null;
       document.getElementById('appShell').classList.add('hidden');
       document.getElementById('loginScreen').classList.remove('hidden');
       document.getElementById('loginForm').reset();
@@ -728,12 +862,17 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
         const target = tab.dataset.tab;
         document.querySelectorAll('main > section').forEach((sec) => sec.classList.add('hidden'));
         document.getElementById(`tab-${target}`).classList.remove('hidden');
+        if (target === 'analytics' && window.__allIdentityRecords.length) {
+          renderAnalytics(window.__allIdentityRecords);
+        }
       });
     });
 
     ['searchQuery', 'searchPhone', 'filterDocType'].forEach((id) => {
-      document.getElementById(id).addEventListener('input', renderAll);
-      document.getElementById(id).addEventListener('change', renderAll);
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', renderAll);
+      el.addEventListener('change', renderAll);
     });
 
     document.getElementById('openAddModalBtn').addEventListener('click', () => {
@@ -979,49 +1118,7 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
 
     document.getElementById('exportCsvBtn').addEventListener('click', async () => {
       const records = await IDVaultDB.getAll('identity_records');
-      const rows = records.map((r) => ({
-        "الاسم الكامل": r.full_name || "",
-        "نوع الهوية": r.doc_type || "بطاقة شخصية إلكترونية",
-        "رقم الهوية": r.doc_number || "",
-        "تاريخ الميلاد": r.birth_date || "",
-        "محل الميلاد": r.birth_place || "",
-        "تاريخ الإصدار": r.issue_date || "",
-        "تاريخ الانتهاء": r.expiry_date || "",
-        "رقم الهاتف": r.phone || "",
-        "العنوان": r.address || "",
-        "الحالة العسكرية": r.military_status || "مدني",
-        "الرتبة العسكرية": r.military_rank || "",
-        "الرقم العسكري": r.military_number || "",
-        "مكان الوجهة": r.destination_place || "",
-        "سبب الوجهة": r.destination_reason || ""
-      }));
-
-      if (typeof XLSX !== "undefined") {
-        const ws = XLSX.utils.json_to_sheet(rows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "الوثائق");
-        XLSX.writeFile(wb, `identity_records_${Date.now()}.xlsx`);
-        showToast("تم تصدير ملف Excel بنجاح", "success");
-      } else {
-        const headers = Object.keys(rows[0] || {
-          "الاسم الكامل": "",
-          "نوع الهوية": "",
-          "رقم الهوية": "",
-          "محل الميلاد": "",
-          "تاريخ الميلاد": ""
-        });
-        const csvRows = [headers.join(",")];
-        for (const row of rows) {
-          csvRows.push(headers.map((h) => `"${String(row[h] || "").replace(/"/g, '""')}"`).join(","));
-        }
-        const bom = String.fromCharCode(0xFEFF);
-        const blob = new Blob([bom + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `identity_records_${Date.now()}.csv`;
-        a.click();
-        showToast("تم التصدير بصيغة CSV", "info");
-      }
+      await exportRecordsToExcelFile(records, "identity_records");
     });
 
     function mapExcelRowToRecord(rawRow) {
@@ -1123,16 +1220,35 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
       await renderAll();
     });
 
-    document.getElementById('downloadBackupBtn').addEventListener('click', async () => {
-      const dump = await IDVaultDB.exportJSON();
-      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `idvault_backup_${Date.now()}.json`;
-      a.click();
+    document.getElementById('downloadBackupBtn')?.addEventListener('click', async () => {
+      try {
+        let dump = null;
+        if (typeof IDVaultDB.exportJSON === 'function') {
+          dump = await IDVaultDB.exportJSON();
+        }
+        if (!dump) {
+          const [identity_records, users, settings, audit_logs] = await Promise.all([
+            IDVaultDB.getAll('identity_records').catch(() => []),
+            IDVaultDB.getAll('users').catch(() => []),
+            IDVaultDB.getSettings().catch(() => DEFAULT_BRANDING),
+            IDVaultDB.getAll('audit_logs').catch(() => [])
+          ]);
+          dump = {
+            exported_at: new Date().toISOString(),
+            identity_records,
+            users,
+            settings,
+            audit_logs
+          };
+        }
+        const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+        await saveOrShareFile(blob, `idvault_backup_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+      } catch (err) {
+        showToast(err?.message || 'تعذر إنشاء النسخة الاحتياطية', 'error');
+      }
     });
 
-    document.getElementById('restoreBackupInput').addEventListener('change', async (e) => {
+    document.getElementById('restoreBackupInput')?.addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       try {
@@ -1164,91 +1280,88 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
   });
 })();
 
+function attachQuickCopyToRows() {
+  const tbody = document.getElementById("recordsTableBody");
+  if (!tbody) return;
+  tbody.querySelectorAll("tr").forEach((tr) => {
+    if (tr.dataset.quickCopyReady === "1") return;
+    const tds = Array.from(tr.querySelectorAll("td"));
+    if (tds.length < 2) return;
 
-  function attachQuickCopyToRows() {
-    const tbody = document.getElementById("recordsTableBody");
-    if (!tbody) return;
-    tbody.querySelectorAll("tr").forEach((tr) => {
-      if (tr.dataset.quickCopyReady === "1") return;
-      const tds = Array.from(tr.querySelectorAll("td"));
-      if (tds.length < 2) return;
+    tds.forEach((td) => {
+      if (td.querySelector("[data-quick-copy]")) return;
+      const rawText = (td.textContent || "").trim();
+      const match = rawText.match(/\b0?7\d{7,8}\b|\b\d{6,16}\b/);
+      if (!match) return;
+      const val = match[0];
+      const label = /^0?7\d{7,8}$/.test(val) ? "رقم الجوال" : "رقم البطاقة";
 
-      tds.forEach((td) => {
-        if (td.querySelector("[data-quick-copy]")) return;
-        const rawText = (td.textContent || "").trim();
-        const match = rawText.match(/\b0?7\d{7,8}\b|\b\d{6,16}\b/);
-        if (!match) return;
-        const val = match[0];
-        const label = /^0?7\d{7,8}$/.test(val) ? "رقم الجوال" : "رقم البطاقة";
-
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.quickCopy = "1";
-        btn.title = `نسخ ${label}`;
-        btn.textContent = "نسخ";
-        btn.className = "mr-1.5 px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold transition align-middle cursor-pointer whitespace-nowrap";
-        btn.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          window.__copyFieldValue(val, label);
-        });
-        td.appendChild(btn);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.quickCopy = "1";
+      btn.title = `نسخ ${label}`;
+      btn.textContent = "نسخ";
+      btn.className = "mr-1.5 px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold transition align-middle cursor-pointer whitespace-nowrap";
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        window.__copyFieldValue(val, label);
       });
-
-      tr.dataset.quickCopyReady = "1";
+      td.appendChild(btn);
     });
+
+    tr.dataset.quickCopyReady = "1";
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const tbody = document.getElementById("recordsTableBody");
+  if (!tbody) return;
+  attachQuickCopyToRows();
+  const obs = new MutationObserver(() => attachQuickCopyToRows());
+  obs.observe(tbody, { childList: true, subtree: true });
+});
+
+(function initDirectStatFilterAndMotion() {
+  if (window.__directStatFilterReady) return;
+  window.__directStatFilterReady = true;
+
+  let currentStatFilter = null;
+
+  const styleId = "directStatFilterMotionStyle";
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      @keyframes statCardBounce {
+        0% { transform: scale(1); }
+        40% { transform: scale(1.04) translateY(-2px); }
+        100% { transform: scale(1.015) translateY(-1px); }
+      }
+      .stat-box-btn {
+        cursor: pointer;
+        user-select: none;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+      }
+      .stat-box-btn:active {
+        transform: scale(0.96);
+      }
+      .stat-box-selected {
+        animation: statCardBounce 0.3s ease forwards;
+        transform: scale(1.015) translateY(-1px);
+      }
+    `;
+    document.head.appendChild(style);
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    const tbody = document.getElementById("recordsTableBody");
-    if (!tbody) return;
-    attachQuickCopyToRows();
-    const obs = new MutationObserver(() => attachQuickCopyToRows());
-    obs.observe(tbody, { childList: true, subtree: true });
-  });
+  const statsMap = [
+    { id: "statTotal", key: null, cls: ["ring-2", "ring-slate-800", "border-slate-800", "bg-slate-50", "shadow-lg", "stat-box-selected"] },
+    { id: "statMilitary", key: "military", cls: ["ring-2", "ring-indigo-600", "border-indigo-600", "bg-indigo-50/70", "shadow-lg", "shadow-indigo-600/20", "stat-box-selected"] },
+    { id: "statExpiring", key: "expiring", cls: ["ring-2", "ring-amber-500", "border-amber-500", "bg-amber-50/70", "shadow-lg", "shadow-amber-500/20", "stat-box-selected"] },
+    { id: "statExpired", key: "expired", cls: ["ring-2", "ring-rose-600", "border-rose-600", "bg-rose-50/70", "shadow-lg", "shadow-rose-600/20", "stat-box-selected"] }
+  ];
 
-
-  (function initDirectStatFilterAndMotion() {
-    if (window.__directStatFilterReady) return;
-    window.__directStatFilterReady = true;
-
-    let currentStatFilter = null;
-
-    const styleId = "directStatFilterMotionStyle";
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement("style");
-      style.id = styleId;
-      style.textContent = `
-        @keyframes statCardBounce {
-          0% { transform: scale(1); }
-          40% { transform: scale(1.04) translateY(-2px); }
-          100% { transform: scale(1.015) translateY(-1px); }
-        }
-        .stat-box-btn {
-          cursor: pointer;
-          user-select: none;
-          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
-        }
-        .stat-box-btn:active {
-          transform: scale(0.96);
-        }
-        .stat-box-selected {
-          animation: statCardBounce 0.3s ease forwards;
-          transform: scale(1.015) translateY(-1px);
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    const statsMap = [
-      { id: "statTotal", key: null, cls: ["ring-2", "ring-slate-800", "border-slate-800", "bg-slate-50", "shadow-lg", "stat-box-selected"] },
-      { id: "statMilitary", key: "military", cls: ["ring-2", "ring-indigo-600", "border-indigo-600", "bg-indigo-50/70", "shadow-lg", "shadow-indigo-600/20", "stat-box-selected"] },
-      { id: "statExpiring", key: "expiring", cls: ["ring-2", "ring-amber-500", "border-amber-500", "bg-amber-50/70", "shadow-lg", "shadow-amber-500/20", "stat-box-selected"] },
-      { id: "statExpired", key: "expired", cls: ["ring-2", "ring-rose-600", "border-rose-600", "bg-rose-50/70", "shadow-lg", "shadow-rose-600/20", "stat-box-selected"] }
-    ];
-
-    const allCls = Array.from(new Set(statsMap.flatMap((s) => s.cls)));
-
-    let isFilteringRows = false;
+  const allCls = Array.from(new Set(statsMap.flatMap((s) => s.cls)));
+  let isFilteringRows = false;
 
   window.__parseLooseDate = function(val) {
     if (!val) return null;
@@ -1271,7 +1384,6 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
     const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
 
-    // 1. فحص تاريخ الانتهاء في السجل إن وُجد
     if (rec && rec.expiry_date) {
       const exp = window.__parseLooseDate(rec.expiry_date);
       if (exp) {
@@ -1284,7 +1396,6 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
       }
     }
 
-    // 2. فحص شارة الصلاحية في الصف (تتجاهل عسكري/مدني)
     const badgeSpans = Array.from(tr.querySelectorAll("span")).filter((sp) => {
       const t = (sp.textContent || "").trim();
       return t.includes("منته") || t.includes("تنتهي خلال") || t.includes("ينتهي خلال") || t.includes("سارية") || t.includes("ساري");
@@ -1325,457 +1436,375 @@ window.API_BASE_URL = window.API_BASE_URL || (window.location.protocol === "file
     }
   };
 
-    const filterRowsNow = () => {
-      if (isFilteringRows) return;
-      isFilteringRows = true;
-      try {
-        const tbody = document.getElementById("recordsTableBody");
-        if (!tbody) return;
+  const filterRowsNow = () => {
+    if (isFilteringRows) return;
+    isFilteringRows = true;
+    try {
+      const tbody = document.getElementById("recordsTableBody");
+      if (!tbody) return;
 
-        tbody.querySelectorAll("tr[data-stat-empty-row]").forEach((el) => el.remove());
+      tbody.querySelectorAll("tr[data-stat-empty-row]").forEach((el) => el.remove());
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      if (!rows.length) return;
 
-        const rows = Array.from(tbody.querySelectorAll("tr"));
-        if (!rows.length) return;
+      if (!currentStatFilter) {
+        rows.forEach((tr) => { tr.style.display = ""; });
+        return;
+      }
 
-        if (!currentStatFilter) {
-          rows.forEach((tr) => { tr.style.display = ""; });
+      let visibleCount = 0;
+      rows.forEach((tr) => {
+        const tds = Array.from(tr.querySelectorAll("td"));
+        if (tds.length < 6) {
+          tr.style.display = "";
           return;
         }
 
-        let visibleCount = 0;
-        rows.forEach((tr) => {
-          const tds = Array.from(tr.querySelectorAll("td"));
-          if (tds.length < 6) {
-            tr.style.display = "";
-            return;
-          }
+        const docTypeText = (tds[1]?.textContent || "").trim();
+        const fullRowText = (tr.textContent || "").trim();
 
-          const docTypeText = (tds[1]?.textContent || "").trim();
-          const expiryCell = tds[5];
-          const expiryText = (expiryCell?.textContent || "").trim();
-          const expiryHtml = expiryCell?.innerHTML || "";
-          const fullRowText = (tr.textContent || "").trim();
-
-          let ok = false;
-          if (currentStatFilter === "military") {
-    const tdsAll = Array.from(tr.querySelectorAll("td"));
-    const nameKey = (tdsAll[0]?.textContent || "").replace(/نسخ/g, "").trim();
-    const docKey = (tdsAll[2]?.textContent || "").replace(/نسخ/g, "").trim();
-    const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-    const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
-    ok = window.__isRecordMilitary(rec) || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docTypeText) || /عسكري/i.test(fullRowText);
-  } else if (currentStatFilter === "expiring") {
-    ok = window.__evalExpiryMatch(tr, "expiring");
-  } else if (currentStatFilter === "expired") {
-    ok = window.__evalExpiryMatch(tr, "expired");
-  }
-
-          tr.style.display = ok ? "" : "none";
-          if (ok) visibleCount++;
-        });
-
-        if (visibleCount === 0) {
-          const emptyTr = document.createElement("tr");
-          emptyTr.dataset.statEmptyRow = "1";
-          emptyTr.innerHTML = `<td colspan="7" class="py-8 text-center text-slate-400 font-semibold">لا توجد سجلات مطابقة لهذا الفلتر</td>`;
-          tbody.appendChild(emptyTr);
+        let ok = false;
+        if (currentStatFilter === "military") {
+          const nameKey = (tds[0]?.textContent || "").replace(/نسخ/g, "").trim();
+          const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
+          const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
+          const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
+          ok = window.__isRecordMilitary(rec) || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docTypeText) || /عسكري/i.test(fullRowText);
+        } else if (currentStatFilter === "expiring") {
+          ok = window.__evalExpiryMatch(tr, "expiring");
+        } else if (currentStatFilter === "expired") {
+          ok = window.__evalExpiryMatch(tr, "expired");
         }
 
-        if (typeof attachQuickCopyToRows === "function") {
-          attachQuickCopyToRows();
-        }
-      } finally {
-        setTimeout(() => { isFilteringRows = false; }, 50);
-      }
-    };
-
-    const paintStatCards = () => {
-      statsMap.forEach((item) => {
-        const numEl = document.getElementById(item.id);
-        const card = numEl ? (numEl.closest("div.rounded-2xl") || numEl.parentElement) : null;
-        if (!card) return;
-        card.classList.add("stat-box-btn");
-        card.classList.remove(...allCls);
-
-        let tag = card.querySelector("[data-stat-active-tag]");
-        if (!tag) {
-          tag = document.createElement("span");
-          tag.dataset.statActiveTag = "1";
-          tag.className = "hidden mt-2 inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-600 text-white";
-          card.appendChild(tag);
-        }
-
-        const isSelected = item.key !== null && currentStatFilter === item.key;
-        if (isSelected) {
-          card.classList.add(...item.cls);
-          tag.textContent = "مفعّل الآن";
-          tag.classList.remove("hidden");
-        } else {
-          tag.classList.add("hidden");
-        }
+        tr.style.display = ok ? "" : "none";
+        if (ok) visibleCount++;
       });
 
-      const badge = document.getElementById("activeStatFilterBadge");
-      const resetBtn = document.getElementById("resetFiltersBtn");
-      if (badge) {
-        if (currentStatFilter) {
-          const names = {
-            military: "فلتر: سجلات عسكرية",
-            expiring: "فلتر: قريبة الانتهاء",
-            expired: "فلتر: منتهية الصلاحية"
-          };
-          badge.textContent = names[currentStatFilter] || "فلتر نشط";
-          badge.classList.remove("hidden");
-        } else {
-          badge.classList.add("hidden");
-        }
+      if (visibleCount === 0) {
+        const emptyTr = document.createElement("tr");
+        emptyTr.dataset.statEmptyRow = "1";
+        emptyTr.innerHTML = `<td colspan="7" class="py-8 text-center text-slate-400 font-semibold">لا توجد سجلات مطابقة لهذا الفلتر</td>`;
+        tbody.appendChild(emptyTr);
       }
-      if (resetBtn) {
-        resetBtn.classList.toggle("hidden", !currentStatFilter);
+
+      if (typeof attachQuickCopyToRows === "function") {
+        attachQuickCopyToRows();
       }
-    };
+    } finally {
+      setTimeout(() => { isFilteringRows = false; }, 50);
+    }
+  };
 
-    const wireCards = () => {
-      let wiredCount = 0;
-      statsMap.forEach((item) => {
-        const numEl = document.getElementById(item.id);
-        const card = numEl ? (numEl.closest("div.rounded-2xl") || numEl.parentElement) : null;
-        if (!card) return;
-        wiredCount++;
-        if (card.dataset.statWired === "1") return;
-        card.dataset.statWired = "1";
-        card.addEventListener("click", () => {
-          if (item.key === null) {
-            currentStatFilter = null;
-          } else {
-            currentStatFilter = currentStatFilter === item.key ? null : item.key;
-          }
-          paintStatCards();
-          filterRowsNow();
-          if (typeof showToast === "function") {
-            showToast(currentStatFilter ? "تم تطبيق الفلترة على الجدول" : "تم إلغاء فلتر البطاقة", "info");
-          }
-        });
-      });
-      paintStatCards();
-      return wiredCount > 0;
-    };
+  const paintStatCards = () => {
+    statsMap.forEach((item) => {
+      const numEl = document.getElementById(item.id);
+      const card = numEl ? (numEl.closest("div.rounded-2xl") || numEl.parentElement) : null;
+      if (!card) return;
+      card.classList.add("stat-box-btn");
+      card.classList.remove(...allCls);
 
+      let tag = card.querySelector("[data-stat-active-tag]");
+      if (!tag) {
+        tag = document.createElement("span");
+        tag.dataset.statActiveTag = "1";
+        tag.className = "hidden mt-2 inline-block px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-600 text-white";
+        card.appendChild(tag);
+      }
+
+      const isSelected = item.key !== null && currentStatFilter === item.key;
+      if (isSelected) {
+        card.classList.add(...item.cls);
+        tag.textContent = "مفعّل الآن";
+        tag.classList.remove("hidden");
+      } else {
+        tag.classList.add("hidden");
+      }
+    });
+
+    const badge = document.getElementById("activeStatFilterBadge");
     const resetBtn = document.getElementById("resetFiltersBtn");
-    if (resetBtn && resetBtn.dataset.statResetWired !== "1") {
-      resetBtn.dataset.statResetWired = "1";
-      resetBtn.addEventListener("click", () => {
-        currentStatFilter = null;
+    if (badge) {
+      if (currentStatFilter) {
+        const names = {
+          military: "فلتر: سجلات عسكرية",
+          expiring: "فلتر: قريبة الانتهاء",
+          expired: "فلتر: منتهية الصلاحية"
+        };
+        badge.textContent = names[currentStatFilter] || "فلتر نشط";
+        badge.classList.remove("hidden");
+      } else {
+        badge.classList.add("hidden");
+      }
+    }
+    if (resetBtn) {
+      resetBtn.classList.toggle("hidden", !currentStatFilter);
+    }
+  };
+
+  const wireCards = () => {
+    let wiredCount = 0;
+    statsMap.forEach((item) => {
+      const numEl = document.getElementById(item.id);
+      const card = numEl ? (numEl.closest("div.rounded-2xl") || numEl.parentElement) : null;
+      if (!card) return;
+      wiredCount++;
+      if (card.dataset.statWired === "1") return;
+      card.dataset.statWired = "1";
+      card.addEventListener("click", () => {
+        if (item.key === null) {
+          currentStatFilter = null;
+        } else {
+          currentStatFilter = currentStatFilter === item.key ? null : item.key;
+        }
         paintStatCards();
         filterRowsNow();
+        if (typeof showToast === "function") {
+          showToast(currentStatFilter ? "تم تطبيق الفلترة على الجدول" : "تم إلغاء فلتر البطاقة", "info");
+        }
       });
-    }
-
-    const tbody = document.getElementById("recordsTableBody");
-    if (tbody && tbody.dataset.statRowsObs !== "1") {
-      tbody.dataset.statRowsObs = "1";
-      }
-
-    if (!wireCards()) {
-      const iv = setInterval(() => {
-        if (wireCards()) clearInterval(iv);
-      }, 250);
-      setTimeout(() => clearInterval(iv), 10000);
-    }
-  })();
-window.__renderSingleStatusColAndFilter = function() {
-    const tbody = document.getElementById("recordsTableBody");
-    if (!tbody) return;
-
-    const table = tbody.closest("table");
-    const theadRow = table ? table.querySelector("thead tr") : null;
-
-    // إزالة أي أعمدة حالة مكررة سابقة ثم إضافة عمود واحد فقط بعد نوع الوثيقة
-    if (theadRow) {
-      theadRow.querySelectorAll("[data-status-th], [data-col-status-th], [data-clean-status-th]").forEach((el) => el.remove());
-      const th = document.createElement("th");
-      th.setAttribute("data-clean-status-th", "1");
-      th.className = "py-3 px-4 text-right font-extrabold text-slate-700 whitespace-nowrap";
-      th.textContent = "الحالة";
-      const ths = Array.from(theadRow.querySelectorAll("th"));
-      const docTypeThIdx = ths.findIndex((h) => (h.textContent || "").includes("نوع الوثيقة"));
-      if (docTypeThIdx !== -1 && ths[docTypeThIdx]) {
-        ths[docTypeThIdx].insertAdjacentElement("afterend", th);
-      } else if (ths.length >= 2) {
-        ths[1].insertAdjacentElement("afterend", th);
-      } else {
-        theadRow.appendChild(th);
-      }
-    }
-
-    const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-    const rows = Array.from(tbody.querySelectorAll("tr")).filter(
-      (tr) => !tr.dataset.statEmptyRow && !tr.querySelector("td[colspan]")
-    );
-
-    rows.forEach((tr) => {
-      // إزالة أي خلايا حالة مكررة سابقة في الصف
-      tr.querySelectorAll("[data-status-td], [data-col-status-td], [data-clean-status-td]").forEach((el) => el.remove());
-
-      const tds = Array.from(tr.querySelectorAll("td"));
-      if (tds.length < 3) return;
-
-      const nameKey = (tds[0]?.textContent || "").trim();
-      const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
-      const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
-      const isMil = typeof window.__isRecordMilitary === "function" ? window.__isRecordMilitary(rec) : (rec ? rec.military_status === "عسكري" : /عسكري/i.test(tr.textContent || ""));
-
-      tr.dataset.isMilitary = isMil ? "1" : "0";
-      if (isMil) {
-        tr.classList.add("ring-2", "ring-rose-500", "bg-rose-50/70");
-        tr.style.borderLeft = "4px solid #e11d48";
-      } else {
-        tr.classList.remove("ring-2", "ring-rose-500", "bg-rose-50/70");
-        tr.style.borderLeft = "";
-      }
-
-      const td = document.createElement("td");
-      td.setAttribute("data-clean-status-td", "1");
-      td.className = "py-3 px-4 whitespace-nowrap";
-      td.innerHTML = window.__getMilitaryStatusBadgeHtml(rec, isMil, (tds[1]?.textContent || "").trim());
-
-      // إدراج خلية الحالة بعد خلية نوع الوثيقة مباشرة (tds[1])
-      tds[1].insertAdjacentElement("afterend", td);
     });
+    paintStatCards();
+    return wiredCount > 0;
   };
 
-  if (!window.__singleStatusObserverInstalled) {
-    window.__singleStatusObserverInstalled = true;
-    const runSync = () => {
-      if (typeof window.__renderSingleStatusColAndFilter === "function") {
-        window.__renderSingleStatusColAndFilter();
-      }
-    };
-    document.addEventListener("DOMContentLoaded", () => {
-      runSync();
-      const tbody = document.getElementById("recordsTableBody");
-      if (tbody) {
-        const mo = new MutationObserver(() => {
-          clearTimeout(window.__statusSyncDeb);
-          window.__statusSyncDeb = setTimeout(runSync, 60);
-        });
-        mo.observe(tbody, { childList: true, subtree: false });
-      }
+  const resetBtn = document.getElementById("resetFiltersBtn");
+  if (resetBtn && resetBtn.dataset.statResetWired !== "1") {
+    resetBtn.dataset.statResetWired = "1";
+    resetBtn.addEventListener("click", () => {
+      currentStatFilter = null;
+      paintStatCards();
+      filterRowsNow();
     });
-    setInterval(runSync, 1200);
   }
-window.__normalizePersonName = function(name) {
-    return String(name || "")
-      .replace(/[\u064B-\u065F\u0670]/g, "")
-      .replace(/[إأآا]/g, "ا")
-      .replace(/ى/g, "ي")
-      .replace(/ة/g, "ه")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
+
+  if (!wireCards()) {
+    const iv = setInterval(() => {
+      if (wireCards()) clearInterval(iv);
+    }, 250);
+    setTimeout(() => clearInterval(iv), 10000);
+  }
+})();
+
+window.__renderSingleStatusColAndFilter = function() {
+  const tbody = document.getElementById("recordsTableBody");
+  if (!tbody) return;
+
+  const table = tbody.closest("table");
+  const theadRow = table ? table.querySelector("thead tr") : null;
+
+  if (theadRow) {
+    theadRow.querySelectorAll("[data-status-th], [data-col-status-th], [data-clean-status-th]").forEach((el) => el.remove());
+    const th = document.createElement("th");
+    th.setAttribute("data-clean-status-th", "1");
+    th.className = "py-3 px-4 text-right font-extrabold text-slate-700 whitespace-nowrap";
+    th.textContent = "الحالة";
+    const ths = Array.from(theadRow.querySelectorAll("th"));
+    const docTypeThIdx = ths.findIndex((h) => (h.textContent || "").includes("نوع الوثيقة"));
+    if (docTypeThIdx !== -1 && ths[docTypeThIdx]) {
+      ths[docTypeThIdx].insertAdjacentElement("afterend", th);
+    } else if (ths.length >= 2) {
+      ths[1].insertAdjacentElement("afterend", th);
+    } else {
+      theadRow.appendChild(th);
+    }
+  }
+
+  const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
+  const rows = Array.from(tbody.querySelectorAll("tr")).filter(
+    (tr) => !tr.dataset.statEmptyRow && !tr.querySelector("td[colspan]")
+  );
+
+  rows.forEach((tr) => {
+    tr.querySelectorAll("[data-status-td], [data-col-status-td], [data-clean-status-td]").forEach((el) => el.remove());
+
+    const tds = Array.from(tr.querySelectorAll("td"));
+    if (tds.length < 3) return;
+
+    const nameKey = (tds[0]?.textContent || "").trim();
+    const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
+    const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
+    const isMil = typeof window.__isRecordMilitary === "function" ? window.__isRecordMilitary(rec) : (rec ? rec.military_status === "عسكري" : /عسكري/i.test(tr.textContent || ""));
+
+    tr.dataset.isMilitary = isMil ? "1" : "0";
+    if (isMil) {
+      tr.classList.add("ring-2", "ring-rose-500", "bg-rose-50/70");
+      tr.style.borderLeft = "4px solid #e11d48";
+    } else {
+      tr.classList.remove("ring-2", "ring-rose-500", "bg-rose-50/70");
+      tr.style.borderLeft = "";
+    }
+
+    const td = document.createElement("td");
+    td.setAttribute("data-clean-status-td", "1");
+    td.className = "py-3 px-4 whitespace-nowrap";
+    td.innerHTML = window.__getMilitaryStatusBadgeHtml(rec, isMil, (tds[1]?.textContent || "").trim());
+
+    tds[1].insertAdjacentElement("afterend", td);
+  });
+};
+
+if (!window.__singleStatusObserverInstalled) {
+  window.__singleStatusObserverInstalled = true;
+  const runSync = () => {
+    if (typeof window.__renderSingleStatusColAndFilter === "function") {
+      window.__renderSingleStatusColAndFilter();
+    }
   };
+  document.addEventListener("DOMContentLoaded", () => {
+    runSync();
+    const tbody = document.getElementById("recordsTableBody");
+    if (tbody) {
+      const mo = new MutationObserver(() => {
+        clearTimeout(window.__statusSyncDeb);
+        window.__statusSyncDeb = setTimeout(runSync, 60);
+      });
+      mo.observe(tbody, { childList: true, subtree: false });
+    }
+  });
+  setInterval(runSync, 1200);
+}
 
-  window.__checkDuplicateBeforeSave = async function(payload, ignoreId) {
-    try {
-      if (typeof IDVaultDB === "undefined" || !IDVaultDB || typeof IDVaultDB.getAll !== "function") {
-        return true;
+window.__normalizePersonName = function(name) {
+  return String(name || "")
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[إأآا]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+};
+
+window.__checkDuplicateBeforeSave = async function(payload, ignoreId) {
+  try {
+    if (typeof IDVaultDB === "undefined" || !IDVaultDB || typeof IDVaultDB.getAll !== "function") {
+      return true;
+    }
+    const existing = await IDVaultDB.getAll("identity_records");
+    if (!Array.isArray(existing) || !existing.length) return true;
+
+    const normNewName = window.__normalizePersonName(payload && payload.full_name);
+    const cleanNewDoc = String((payload && payload.doc_number) || "").trim().toLowerCase();
+
+    const others = existing.filter((item) => !ignoreId || String(item.id) !== String(ignoreId));
+
+    if (cleanNewDoc) {
+      const sameDoc = others.find((item) => String(item.doc_number || "").trim().toLowerCase() === cleanNewDoc);
+      if (sameDoc) {
+        const msg = "تنبيه: رقم الوثيقة (" + sameDoc.doc_number + ") مسجل مسبقاً باسم: " + (sameDoc.full_name || "غير محدد") + ". لا يمكن حفظ رقم وثيقة مكرر.";
+        if (typeof showToast === "function") showToast(msg, "error");
+        else alert(msg);
+        return false;
       }
-      const existing = await IDVaultDB.getAll("identity_records");
-      if (!Array.isArray(existing) || !existing.length) return true;
+    }
 
-      const normNewName = window.__normalizePersonName(payload && payload.full_name);
-      const cleanNewDoc = String((payload && payload.doc_number) || "").trim().toLowerCase();
-
-      const others = existing.filter((item) => !ignoreId || String(item.id) !== String(ignoreId));
-
-      if (cleanNewDoc) {
-        const sameDoc = others.find((item) => String(item.doc_number || "").trim().toLowerCase() === cleanNewDoc);
-        if (sameDoc) {
-          const msg = "تنبيه: رقم الوثيقة (" + sameDoc.doc_number + ") مسجل مسبقاً باسم: " + (sameDoc.full_name || "غير محدد") + ". لا يمكن حفظ رقم وثيقة مكرر.";
-          if (typeof showToast === "function") showToast(msg, "error");
-          else alert(msg);
+    if (normNewName) {
+      const sameNameMatches = others.filter((item) => window.__normalizePersonName(item.full_name) === normNewName);
+      if (sameNameMatches.length > 0) {
+        const sample = sameNameMatches[0];
+        const details = "الاسم (" + payload.full_name + ") موجود مسبقاً في السجلات (" + sameNameMatches.length + " سجل)\n"
+          + "مثال السجل المسجل: " + (sample.full_name || "") + " | " + (sample.doc_type || "") + " | رقم: " + (sample.doc_number || "بدون رقم") + "\n\n"
+          + "هل تؤكد أن هذا شخص مختلف أو إضافة وثيقة جديدة وتريد المتابعة؟";
+        const ok = window.confirm(details);
+        if (!ok) {
+          if (typeof showToast === "function") showToast("تم إلغاء الحفظ لوجود الاسم مسبقاً", "warning");
           return false;
         }
       }
-
-      if (normNewName) {
-        const sameNameMatches = others.filter((item) => window.__normalizePersonName(item.full_name) === normNewName);
-        if (sameNameMatches.length > 0) {
-          const sample = sameNameMatches[0];
-          const details = "الاسم (" + payload.full_name + ") موجود مسبقاً في السجلات (" + sameNameMatches.length + " سجل)\n"
-            + "مثال السجل المسجل: " + (sample.full_name || "") + " | " + (sample.doc_type || "") + " | رقم: " + (sample.doc_number || "بدون رقم") + "\n\n"
-            + "هل تؤكد أن هذا شخص مختلف أو إضافة وثيقة جديدة وتريد المتابعة؟";
-          const ok = window.confirm(details);
-          if (!ok) {
-            if (typeof showToast === "function") showToast("تم إلغاء الحفظ لوجود الاسم مسبقاً", "warning");
-            return false;
-          }
-        }
-      }
-
-      return true;
-    } catch {
-      return true;
-    }
-  };
-
-
-  window.__dupSubmitGuardInstalled = true;
-  document.addEventListener("submit", async (ev) => {
-    const form = ev.target;
-    if (!form || !form.querySelector) return;
-    const nameInput = form.querySelector("#fullName, [name='full_name']");
-    if (!nameInput) return;
-
-    if (form.dataset.dupConfirmedOnce === "1") {
-      form.dataset.dupConfirmedOnce = "";
-      return;
     }
 
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
+    return true;
+  } catch {
+    return true;
+  }
+};
 
-    const docInput = form.querySelector("#docNumber, [name='doc_number']");
-    const typeInput = form.querySelector("#docType, [name='doc_type']");
-    const idInput = form.querySelector("#recordId, [name='id']");
+window.__dupSubmitGuardInstalled = true;
+document.addEventListener("submit", async (ev) => {
+  const form = ev.target;
+  if (!form || form.id !== "recordForm") return;
 
-    const allowed = await window.__checkDuplicateBeforeSave({
-      full_name: nameInput.value || "",
-      doc_number: docInput ? docInput.value || "" : "",
-      doc_type: typeInput ? typeInput.value || "" : ""
-    }, idInput ? idInput.value : null);
+  if (form.dataset.dupConfirmedOnce === "1") {
+    form.dataset.dupConfirmedOnce = "";
+    return;
+  }
 
-    if (allowed) {
-      form.dataset.dupConfirmedOnce = "1";
-      if (typeof form.requestSubmit === "function") {
-        form.requestSubmit();
-      } else {
-        form.submit();
-      }
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+
+  const nameEl = document.getElementById("recFullName");
+  const docEl = document.getElementById("recDocNumber");
+  const typeEl = document.getElementById("recDocType");
+  const idEl = document.getElementById("recordId");
+
+  const allowed = await window.__checkDuplicateBeforeSave({
+    full_name: nameEl ? nameEl.value || "" : "",
+    doc_number: docEl ? docEl.value || "" : "",
+    doc_type: typeEl ? typeEl.value || "" : ""
+  }, idEl && idEl.value ? idEl.value : null);
+
+  if (allowed) {
+    form.dataset.dupConfirmedOnce = "1";
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      form.submit();
     }
-  }, true);
+  }
+}, true);
 
+window.__isMilitaryDocSelected = function() {
+  const docSel = document.getElementById("recDocType");
+  if (!docSel) return false;
+  const docVal = String(docSel.value || "");
+  const docLabel = String(docSel.selectedOptions?.[0]?.textContent || "");
+  return /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docVal + " " + docLabel);
+};
 
-  window.__dupSubmitGuardInstalled = true;
-  document.addEventListener("submit", async (ev) => {
-    const form = ev.target;
-    if (!form || form.id !== "recordForm") return;
+window.__syncDocTypeToMilitaryStatus = function() {
+  const docSel = document.getElementById("recDocType");
+  const statusSel = document.getElementById("recMilitaryStatus");
+  const extraFields = document.getElementById("militaryExtraFields");
+  if (!docSel || !statusSel) return;
 
-    if (form.dataset.dupConfirmedOnce === "1") {
-      form.dataset.dupConfirmedOnce = "";
-      return;
-    }
+  const lockedMilitary = window.__isMilitaryDocSelected();
 
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-
-    const nameEl = document.getElementById("recFullName");
-    const docEl = document.getElementById("recDocNumber");
-    const typeEl = document.getElementById("recDocType");
-    const idEl = document.getElementById("recordId");
-
-    const allowed = await window.__checkDuplicateBeforeSave({
-      full_name: nameEl ? nameEl.value || "" : "",
-      doc_number: docEl ? docEl.value || "" : "",
-      doc_type: typeEl ? typeEl.value || "" : ""
-    }, idEl && idEl.value ? idEl.value : null);
-
-    if (allowed) {
-      form.dataset.dupConfirmedOnce = "1";
-      if (typeof form.requestSubmit === "function") {
-        form.requestSubmit();
-      } else {
-        form.submit();
-      }
-    }
-  }, true);
-
-
-  window.__syncDocTypeToMilitaryStatus = function() {
-    const docSel = document.getElementById("recDocType");
-    const statusSel = document.getElementById("recMilitaryStatus");
-    const extraFields = document.getElementById("militaryExtraFields");
-    if (!docSel || !statusSel) return;
-
-    const docVal = String(docSel.value || "");
-    const docLabel = String(docSel.selectedOptions?.[0]?.textContent || "");
-    const isMilitaryDoc = /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docVal + " " + docLabel);
-
-    if (isMilitaryDoc) {
-      if (statusSel.value !== "عسكري") {
-        statusSel.value = "عسكري";
-        statusSel.dataset.autoMilitaryFromDoc = "1";
-        statusSel.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      if (extraFields) extraFields.classList.remove("hidden");
-    } else if (statusSel.dataset.autoMilitaryFromDoc === "1") {
+  if (lockedMilitary) {
+    statusSel.value = "عسكري";
+    statusSel.disabled = true;
+    statusSel.classList.add("bg-slate-100", "cursor-not-allowed");
+    statusSel.dataset.lockedByMilitaryDoc = "1";
+    if (extraFields) extraFields.classList.remove("hidden");
+  } else {
+    if (statusSel.dataset.lockedByMilitaryDoc === "1") {
+      statusSel.disabled = false;
+      statusSel.classList.remove("bg-slate-100", "cursor-not-allowed");
+      statusSel.dataset.lockedByMilitaryDoc = "";
       statusSel.value = "مدني";
-      statusSel.dataset.autoMilitaryFromDoc = "";
       statusSel.dispatchEvent(new Event("change", { bubbles: true }));
       if (extraFields) extraFields.classList.add("hidden");
-    }
-  };
-
-
-  window.__isMilitaryDocSelected = function() {
-    const docSel = document.getElementById("recDocType");
-    if (!docSel) return false;
-    const docVal = String(docSel.value || "");
-    const docLabel = String(docSel.selectedOptions?.[0]?.textContent || "");
-    return /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docVal + " " + docLabel);
-  };
-
-  window.__syncDocTypeToMilitaryStatus = function() {
-    const docSel = document.getElementById("recDocType");
-    const statusSel = document.getElementById("recMilitaryStatus");
-    const extraFields = document.getElementById("militaryExtraFields");
-    if (!docSel || !statusSel) return;
-
-    const lockedMilitary = window.__isMilitaryDocSelected();
-
-    if (lockedMilitary) {
-      statusSel.value = "عسكري";
-      statusSel.disabled = true;
-      statusSel.classList.add("bg-slate-100", "cursor-not-allowed");
-      statusSel.dataset.lockedByMilitaryDoc = "1";
-      if (extraFields) extraFields.classList.remove("hidden");
     } else {
-      if (statusSel.dataset.lockedByMilitaryDoc === "1") {
-        statusSel.disabled = false;
-        statusSel.classList.remove("bg-slate-100", "cursor-not-allowed");
-        statusSel.dataset.lockedByMilitaryDoc = "";
-        statusSel.value = "مدني";
-        statusSel.dispatchEvent(new Event("change", { bubbles: true }));
-        if (extraFields) extraFields.classList.add("hidden");
-      } else {
-        statusSel.disabled = false;
-        statusSel.classList.remove("bg-slate-100", "cursor-not-allowed");
-      }
+      statusSel.disabled = false;
+      statusSel.classList.remove("bg-slate-100", "cursor-not-allowed");
     }
-  };
+  }
+};
 
-  document.addEventListener("change", (e) => {
-    const t = e.target;
-    if (!t) return;
-    if (t.id === "recDocType") {
-      window.__syncDocTypeToMilitaryStatus();
-    } else if (t.id === "recMilitaryStatus" && window.__isMilitaryDocSelected()) {
-      t.value = "عسكري";
-      t.disabled = true;
-      const extraFields = document.getElementById("militaryExtraFields");
-      if (extraFields) extraFields.classList.remove("hidden");
-      if (typeof showToast === "function") {
-        showToast("لا يمكن تغيير الحالة إلى مدني لأن نوع الوثيقة بطاقة عسكرية", "warning");
-      }
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!t) return;
+  if (t.id === "recDocType") {
+    window.__syncDocTypeToMilitaryStatus();
+  } else if (t.id === "recMilitaryStatus" && window.__isMilitaryDocSelected()) {
+    t.value = "عسكري";
+    t.disabled = true;
+    const extraFields = document.getElementById("militaryExtraFields");
+    if (extraFields) extraFields.classList.remove("hidden");
+    if (typeof showToast === "function") {
+      showToast("لا يمكن تغيير الحالة إلى مدني لأن نوع الوثيقة بطاقة عسكرية", "warning");
     }
-  }, true);
-
-  document.addEventListener("click", (e) => {
-    const t = e.target;
-    if (t && (t.id === "openAddRecordBtn" || t.closest("#openAddRecordBtn"))) {
-      setTimeout(() => window.__syncDocTypeToMilitaryStatus(), 50);
-    }
-  }, true);
+  }
+}, true);
 
 /* === ALL_SEVEN_IMPROVEMENTS_START === */
 (function() {
@@ -1796,7 +1825,7 @@ window.__normalizePersonName = function(name) {
       btn.id = "quickFilterMilCivilBtn";
       btn.textContent = "عسكري · هوية مدنية";
       btn.className = "px-3 py-2 rounded-xl border border-rose-300 bg-rose-50 text-rose-700 text-xs font-extrabold hover:bg-rose-100 transition whitespace-nowrap";
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const active = btn.dataset.active === "1";
         btn.dataset.active = active ? "0" : "1";
         btn.classList.toggle("ring-2", !active);
@@ -1805,38 +1834,13 @@ window.__normalizePersonName = function(name) {
         btn.classList.toggle("text-white", !active);
         btn.classList.toggle("bg-rose-50", active);
         btn.classList.toggle("text-rose-700", active);
-        window.__applyAllSevenFilters();
+        if (typeof window.__renderAllRecords === "function") {
+          await window.__renderAllRecords();
+        }
       });
       filterBar.appendChild(btn);
     }
   }
-
-  window.__isMilitaryWithCivilDoc = function(tr) {
-    if (!tr) return false;
-    const tds = Array.from(tr.querySelectorAll("td"));
-    const nameKey = (tds[0]?.textContent || "").replace(/نسخ/g, "").trim();
-    const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
-    const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-    const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
-    const isMil = typeof window.__isRecordMilitary === "function" ? window.__isRecordMilitary(rec) : (tr.dataset.isMilitary === "1" || /عسكري/.test(tr.textContent || ""));
-    const dt = String((rec && rec.doc_type) || (tds[1]?.textContent || "")).trim();
-    const hasCivilDoc = dt && !/عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
-    return Boolean(isMil && hasCivilDoc);
-  };
-
-  window.__applyAllSevenFilters = function() {
-    ensureCivilDocMilitaryFilterUi();
-    const tbody = document.getElementById("recordsTableBody");
-    if (!tbody) return;
-    const btn = document.getElementById("quickFilterMilCivilBtn");
-    const typeSel = document.getElementById("filterDocType");
-    const onlyMilCivil = Boolean((btn && btn.dataset.active === "1") || (typeSel && typeSel.value === "__mil_civil_doc__"));
-    if (!onlyMilCivil) return;
-    Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
-      if (tr.style.display === "none") return;
-      tr.style.display = window.__isMilitaryWithCivilDoc(tr) ? "" : "none";
-    });
-  };
 
   window.__resetMilitaryLockState = function() {
     const statusSel = document.getElementById("recMilitaryStatus");
@@ -1910,60 +1914,19 @@ window.__normalizePersonName = function(name) {
     return true;
   }
 
-  function exportFilteredRowsToExcel() {
-    const tbody = document.getElementById("recordsTableBody");
-    if (!tbody || typeof XLSX === "undefined") {
-      if (typeof showToast === "function") showToast("مكتبة Excel غير متاحة حالياً", "warning");
-      return;
-    }
-    const visibleRows = Array.from(tbody.querySelectorAll("tr")).filter((tr) => tr.style.display !== "none");
-    if (!visibleRows.length) {
-      if (typeof showToast === "function") showToast("لا توجد صفوف ظاهرة لتصديرها", "warning");
-      return;
-    }
-    const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-    const exportData = visibleRows.map((tr) => {
-      const tds = Array.from(tr.querySelectorAll("td"));
-      const nameTxt = (tds[0]?.textContent || "").replace(/نسخ/g, "").trim();
-      const docTxt = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
-      const rec = (docTxt && lookup.byDoc[docTxt]) || (nameTxt && lookup.byName[nameTxt]) || null;
-      if (rec) {
-        return {
-          "الاسم الكامل": rec.full_name || nameTxt,
-          "نوع الهوية": rec.doc_type || (tds[1]?.textContent || "").trim(),
-          "رقم الهوية": rec.doc_number || docTxt,
-          "محل الميلاد": rec.birth_place || "",
-          "تاريخ الميلاد": rec.birth_date || "",
-          "تاريخ الإصدار": rec.issue_date || "",
-          "تاريخ الانتهاء": rec.expiry_date || "",
-          "المهنة": rec.profession || "",
-          "رقم الهاتف": rec.phone || "",
-          "العنوان": rec.address || "",
-          "الحالة العسكرية": (rec.military_status === "عسكري" || window.__isMilitaryWithCivilDoc(tr)) ? "عسكري" : (rec.military_status || "مدني"),
-          "الرتبة العسكرية": rec.military_rank || "",
-          "الرقم العسكري": rec.military_number || "",
-          "مكان الوجهة": rec.destination_place || "",
-          "سبب الوجهة": rec.destination_reason || ""
-        };
-      }
-      return { "البيانات": tr.textContent.replace(/\s+/g, " ").trim() };
-    });
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, ws, "السجلات_المفلترة");
-    XLSX.writeFile(wb, "سجلات_مفلترة_" + new Date().toISOString().slice(0, 10) + ".xlsx");
-    if (typeof showToast === "function") showToast("تم تصدير " + visibleRows.length + " سجل مفلتر إلى Excel", "success");
-  }
-
   function injectFilteredExportButton() {
-    const exportBtn = Array.from(document.querySelectorAll("button")).find((b) => /تصدير\s*Excel/i.test(b.textContent || ""));
+    const exportBtn = document.getElementById("exportCsvBtn") || Array.from(document.querySelectorAll("button")).find((b) => /تصدير\s*Excel/i.test(b.textContent || ""));
     if (!exportBtn || document.getElementById("exportFilteredExcelBtn")) return;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.id = "exportFilteredExcelBtn";
     btn.textContent = "تصدير المفلتر Excel";
     btn.className = "px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition whitespace-nowrap";
-    btn.addEventListener("click", exportFilteredRowsToExcel);
+    btn.addEventListener("click", () => {
+      if (typeof window.__exportFilteredRecordsNow === "function") {
+        window.__exportFilteredRecordsNow();
+      }
+    });
     exportBtn.insertAdjacentElement("afterend", btn);
   }
 
@@ -1985,7 +1948,7 @@ window.__normalizePersonName = function(name) {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!t) return;
-    if (t.closest("[data-edit-id], [onclick*='editRecord'], #openAddRecordBtn, [onclick*='openAddModal']")) {
+    if (t.closest("[data-edit-id], [onclick*='editRecord'], #openAddRecordBtn, #openAddModalBtn, [onclick*='openAddModal']")) {
       window.__resetMilitaryLockState();
       setTimeout(renderInlineNameAlert, 80);
     }
@@ -2013,7 +1976,6 @@ window.__normalizePersonName = function(name) {
     ensureCivilDocMilitaryFilterUi();
     injectFilteredExportButton();
     updateExpiryStatsAlertBadge();
-    window.__applyAllSevenFilters();
   };
 
   document.addEventListener("DOMContentLoaded", runUiEnhancements);
@@ -2051,7 +2013,6 @@ window.__normalizePersonName = function(name) {
     return window.confirm(msg);
   }
 
-  // 1. اعتراض IDVaultDB.remove و IDVaultDB.delete على جدول identity_records
   if (typeof IDVaultDB !== "undefined") {
     if (typeof IDVaultDB.remove === "function" && !IDVaultDB.__removeGuarded) {
       IDVaultDB.__removeGuarded = true;
@@ -2077,7 +2038,6 @@ window.__normalizePersonName = function(name) {
     }
   }
 
-  // 2. اعتراض AppActions.deleteRecord مباشرة قبل التنفيذ
   const wrapAppActionsDelete = () => {
     if (typeof AppActions !== "undefined" && typeof AppActions.deleteRecord === "function" && !AppActions.deleteRecord.__guarded) {
       const origDelRec = AppActions.deleteRecord.bind(AppActions);
@@ -2094,7 +2054,6 @@ window.__normalizePersonName = function(name) {
   document.addEventListener("DOMContentLoaded", wrapAppActionsDelete);
   setTimeout(wrapAppActionsDelete, 500);
 
-  // 3. اعتراض إرسال نموذج التعديل (عند وجود recordId)
   document.addEventListener("submit", (e) => {
     const form = e.target;
     if (!form || form.id !== "recordForm") return;
@@ -2124,8 +2083,7 @@ window.__normalizePersonName = function(name) {
   function getCurrentUserRole() {
     try {
       if (window.currentUser && window.currentUser.role) return String(window.currentUser.role).toLowerCase();
-      if (typeof currentUser !== "undefined" && currentUser && currentUser.role) return String(currentUser.role).toLowerCase();
-      for (const k of ["currentUser", "authUser", "loggedInUser", "sessionUser", "user"]) {
+      for (const k of ["idvault_session", "idvault_session_backup", "currentUser", "authUser", "loggedInUser", "sessionUser", "user"]) {
         const raw = sessionStorage.getItem(k) || localStorage.getItem(k);
         if (!raw) continue;
         try {
@@ -2158,14 +2116,14 @@ window.__normalizePersonName = function(name) {
 
   function getRestrictedElements() {
     const set = new Set();
-    ["exportCsvBtn", "exportFilteredExcelBtn", "importCsvInput"].forEach((id) => {
+    ["exportCsvBtn", "exportFilteredExcelBtn", "importCsvInput", "downloadBackupBtn", "restoreBackupInput"].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
-      set.add(id === "importCsvInput" && el.closest("label") ? el.closest("label") : el);
+      set.add((id === "importCsvInput" || id === "restoreBackupInput") && el.closest("label") ? el.closest("label") : el);
     });
     document.querySelectorAll("button, a, label").forEach((el) => {
       const txt = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (/تصدير\s*Excel|تصدير\s*المفلتر\s*Excel|استيراد\s*Excel|تصدير.*JSON|استعادة.*JSON/i.test(txt) || isDeleteElement(el)) {
+      if (/تصدير\s*Excel|تصدير\s*المفلتر\s*Excel|استيراد\s*Excel|تحميل\s*نسخة\s*احتياطية|استعادة\s*نسخة\s*JSON/i.test(txt) || isDeleteElement(el)) {
         set.add(el);
       }
     });
@@ -2205,163 +2163,31 @@ window.__normalizePersonName = function(name) {
   }
 
   document.addEventListener("click", (e) => {
-    const el = e.target && e.target.closest("#exportCsvBtn, #exportFilteredExcelBtn, button, a, label");
+    const el = e.target && e.target.closest("#exportCsvBtn, #exportFilteredExcelBtn, #downloadBackupBtn, button, a, label");
     if (!el) return;
     if (isDeleteElement(el)) {
       denyNonAdmin(e, "حذف السجلات متاح للأدمن فقط");
       return;
     }
     const txt = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (el.id === "exportCsvBtn" || el.id === "exportFilteredExcelBtn" || /تصدير|استيراد/i.test(txt)) {
-      denyNonAdmin(e, "التصدير والاستيراد متاح للأدمن فقط");
+    if (el.id === "exportCsvBtn" || el.id === "exportFilteredExcelBtn" || el.id === "downloadBackupBtn" || /تصدير|استيراد|نسخة احتياطية|استعادة نسخة/i.test(txt)) {
+      denyNonAdmin(e, "هذا الإجراء متاح للأدمن فقط");
     }
   }, true);
 
   document.addEventListener("change", (e) => {
     const inp = e.target;
-    if (inp && (inp.id === "importCsvInput" || (inp.tagName === "INPUT" && inp.type === "file"))) {
-      if (denyNonAdmin(e, "الاستيراد متاح للأدمن فقط")) inp.value = "";
+    if (inp && (inp.id === "importCsvInput" || inp.id === "restoreBackupInput")) {
+      if (denyNonAdmin(e, "الاستيراد والاستعادة متاحان للأدمن فقط")) inp.value = "";
     }
   }, true);
 
-  const guardActions = () => {
-    if (typeof AppActions === "object" && AppActions) {
-      if (typeof AppActions.deleteRecord === "function" && !AppActions.deleteRecord.__adminGuarded) {
-        const origDel = AppActions.deleteRecord.bind(AppActions);
-        const wrappedDel = async function(...args) {
-          if (denyNonAdmin(null, "حذف السجلات متاح للأدمن فقط")) return null;
-          return await origDel(...args);
-        };
-        wrappedDel.__adminGuarded = true;
-        AppActions.deleteRecord = wrappedDel;
-      }
-      Object.keys(AppActions).forEach((k) => {
-        if (/export|import/i.test(k) && typeof AppActions[k] === "function" && !AppActions[k].__adminGuarded) {
-          const orig = AppActions[k].bind(AppActions);
-          const wrapped = async function(...args) {
-            if (denyNonAdmin(null, "التصدير والاستيراد متاح للأدمن فقط")) return null;
-            return await orig(...args);
-          };
-          wrapped.__adminGuarded = true;
-          AppActions[k] = wrapped;
-        }
-      });
-    }
-    if (typeof IDVaultDB === "object" && IDVaultDB) {
-      ["remove", "exportJSON", "importJSON"].forEach((m) => {
-        if (typeof IDVaultDB[m] === "function" && !IDVaultDB[m].__adminGuarded) {
-          const orig = IDVaultDB[m].bind(IDVaultDB);
-          const isDel = m === "remove";
-          const wrapped = async function(...args) {
-            if (denyNonAdmin(null, isDel ? "حذف السجلات متاح للأدمن فقط" : "التصدير والاستيراد متاح للأدمن فقط")) return null;
-            return await orig(...args);
-          };
-          wrapped.__adminGuarded = true;
-          IDVaultDB[m] = wrapped;
-        }
-      });
-    }
-  };
-
   const obs = new MutationObserver(() => syncAdminVisibility());
   obs.observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener("DOMContentLoaded", () => { syncAdminVisibility(); guardActions(); });
-  setInterval(() => { syncAdminVisibility(); guardActions(); }, 600);
+  document.addEventListener("DOMContentLoaded", syncAdminVisibility);
+  setInterval(syncAdminVisibility, 600);
 })();
 /* === ADMIN_ONLY_PERMISSIONS_END === */
-
-/* === MILITARY_CIVIL_STATS_START === */
-(function() {
-  let busy = false;
-
-  function removeTopCardIfAny() {
-    const card = document.getElementById("militaryCivilStatCard");
-    if (card) card.remove();
-  }
-
-  function matchesMilitaryAndCivil(rec) {
-    if (!rec || typeof rec !== "object") return false;
-    const allText = Object.values(rec)
-      .filter((v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return /عسكري|عسكرية|military/i.test(allText) && /هوية\s*مدنية|مدني|مدنية|بطاقة\s*شخصية|civil/i.test(allText);
-  }
-
-  async function getRecordsSafe() {
-    try {
-      if (typeof IDVaultDB === "object" && IDVaultDB && typeof IDVaultDB.getAll === "function") {
-        const list = await IDVaultDB.getAll();
-        if (Array.isArray(list)) return list;
-      }
-    } catch {}
-    return Array.from(document.querySelectorAll("tbody tr")).map((tr) => ({ text: tr.textContent || "" }));
-  }
-
-  function findVisibleDistCard() {
-    const all = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, p, div, span"));
-    const heading = all.find((el) => {
-      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-      return t === "توزيع الوثائق حسب النوع" && el.offsetParent !== null;
-    });
-    if (!heading) return null;
-    let cur = heading.parentElement;
-    while (cur && cur !== document.body) {
-      if (cur.offsetParent !== null && cur.querySelectorAll("div").length >= 4) {
-        return cur;
-      }
-      cur = cur.parentElement;
-    }
-    return heading.parentElement;
-  }
-
-  async function renderDistRow() {
-    if (busy) return;
-    removeTopCardIfAny();
-    const box = findVisibleDistCard();
-    if (!box) return;
-    busy = true;
-    try {
-      const records = await getRecordsSafe();
-      const total = records.length || 0;
-      const count = records.filter(matchesMilitaryAndCivil).length;
-      const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-      const clamped = Math.max(0, Math.min(100, pct));
-
-      let row = document.getElementById("militaryCivilDistRow");
-      if (!row) {
-        row = document.createElement("div");
-        row.id = "militaryCivilDistRow";
-        row.style.marginTop = "14px";
-        row.style.paddingTop = "4px";
-        row.innerHTML = [
-          "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:14px;\">",
-          "  <span id=\"militaryCivilDistLabel\" style=\"color:#334155;font-weight:500;direction:ltr;\">(0%) 0</span>",
-          "  <span style=\"color:#1e293b;font-weight:600;\">عسكري بهوية مدنية</span>",
-          "</div>",
-          "<div style=\"width:100%;height:8px;background:#e2e8f0;border-radius:9999px;overflow:hidden;\">",
-          "  <div id=\"militaryCivilDistBar\" style=\"width:0%;height:100%;background:#4f46e5;border-radius:9999px;transition:width 0.25s ease;\"></div>",
-          "</div>"
-        ].join("");
-      }
-      if (row.parentElement !== box) {
-        box.appendChild(row);
-      }
-      const labelEl = document.getElementById("militaryCivilDistLabel");
-      const barEl = document.getElementById("militaryCivilDistBar");
-      if (labelEl) labelEl.textContent = "(" + pct + "%) " + count;
-      if (barEl) barEl.style.width = clamped + "%";
-    } finally {
-      busy = false;
-    }
-  }
-
-  document.addEventListener("click", () => { setTimeout(renderDistRow, 120); }, true);
-  window.addEventListener("load", () => { setTimeout(renderDistRow, 200); });
-  setTimeout(renderDistRow, 300);
-})();
-/* === MILITARY_CIVIL_STATS_END === */
 
 /* === SESSION_TIMEOUT_GUARD_START === */
 (function() {
@@ -2420,10 +2246,7 @@ window.__normalizePersonName = function(name) {
       if (!localStorage.getItem("idvault_session_backup")) {
         try { localStorage.setItem("idvault_session_backup", str); } catch {}
       }
-      try {
-        if (typeof currentUser !== "undefined" && !currentUser) currentUser = s;
-        if (!window.currentUser) window.currentUser = s;
-      } catch {}
+      if (!window.currentUser) window.currentUser = s;
       const loginEl = document.getElementById("loginScreen");
       if (loginEl && !loginEl.classList.contains("hidden")) {
         loginEl.classList.add("hidden");
@@ -2455,7 +2278,6 @@ window.__normalizePersonName = function(name) {
   function getActiveRole() {
     try {
       if (window.currentUser && window.currentUser.role) return String(window.currentUser.role).toLowerCase();
-      if (typeof currentUser !== "undefined" && currentUser && currentUser.role) return String(currentUser.role).toLowerCase();
       for (const k of ["idvault_session", "idvault_session_backup"]) {
         const raw = sessionStorage.getItem(k) || localStorage.getItem(k);
         if (!raw) continue;
@@ -2474,7 +2296,8 @@ window.__normalizePersonName = function(name) {
   }
 
   async function deleteAuditFromApi(olderThanDays) {
-    const url = olderThanDays ? `/api/audit?olderThanDays=${olderThanDays}` : "/api/audit";
+    const base = window.API_BASE_URL || "";
+    const url = olderThanDays ? `${base}/api/audit?olderThanDays=${olderThanDays}` : `${base}/api/audit`;
     const res = await fetch(url, { method: "DELETE" });
     return res.ok;
   }
@@ -2501,7 +2324,7 @@ window.__normalizePersonName = function(name) {
       } else {
         alert("تعذر مسح السجل من الخادم، تأكد من إعادة تشغيل السيرفر.");
       }
-    } catch (e) {
+    } catch {
       alert("حدث خطأ أثناء محاولة مسح سجل التدقيق.");
     }
   };
