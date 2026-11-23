@@ -1,0 +1,16 @@
+{
+  "name": "identity-vault-pro",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "express": "^4.19.2",
+    "sql.js": "^1.11.0"
+  }
+}

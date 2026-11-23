@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>نظام إدارة وثائق الهوية</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Cairo', 'sans-serif'] },
+          boxShadow: {
+            card: '0 4px 20px -2px rgba(15, 23, 42, 0.05)'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    .modal-backdrop {
+      backdrop-filter: blur(6px);
+      background-color: rgba(15, 23, 42, 0.45);
+    }
+    .smooth-transition {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .hidden { display: none !important; }
+    svg {
+      width: 28px !important;
+      height: 28px !important;
+      max-width: 28px !important;
+      max-height: 28px !important;
+    }
+    #loginScreen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #loginScreen > div {
+      width: 100%;
+      max-width: 420px;
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-indigo-100 selection:text-indigo-900">
+
+  <div id="toastContainer" class="fixed top-5 left-5 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none" style="z-index: 99999;"></div>
+
+  <section id="loginScreen" class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
+    <div class="w-full max-w-md bg-white/95 backdrop-blur rounded-3xl shadow-2xl p-7 sm:p-8 border border-white/20">
+      <div class="flex flex-col items-center text-center mb-7">
+        <div id="loginBrandVisual" class="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4 overflow-hidden">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <h1 id="loginSystemName" class="text-xl sm:text-2xl font-extrabold text-slate-900">نظام إدارة وثائق الهوية</h1>
+        <p class="text-sm text-slate-500 mt-1">تسجيل الدخول إلى لوحة التحكم</p>
+      </div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">اسم المستخدم</label>
+          <input id="loginUsername" type="text" required autocomplete="username" placeholder="أدخل اسم المستخدم (مثال: admin)"
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none smooth-transition" />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">كلمة المرور</label>
+          <input id="loginPassword" type="password" required autocomplete="current-password" placeholder="أدخل كلمة المرور"
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none smooth-transition" />
+        </div>
+        <button type="submit"
+          class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold shadow-lg shadow-indigo-600/25 smooth-transition cursor-pointer">
+          دخول
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <div id="appShell" class="hidden min-h-screen flex flex-col">
+    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div id="headerBrandVisual" class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <div class="truncate">
+            <h2 id="headerSystemName" class="text-base sm:text-lg font-extrabold text-slate-900 truncate">نظام إدارة وثائق الهوية</h2>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div class="hidden sm:flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full text-xs font-semibold text-slate-700">
+            <span id="currentUserDisplay"></span>
+            <span id="currentRoleBadge" class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700"></span>
+          </div>
+          <button id="logoutBtn" type="button"
+            class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 smooth-transition cursor-pointer">
+            خروج
+          </button>
+        </div>
+      </div>
+
+      <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto whitespace-nowrap border-t border-slate-100 py-1.5 text-sm font-bold">
+        <button data-tab="records" class="nav-tab px-4 py-2 rounded-xl bg-indigo-600 text-white whitespace-nowrap smooth-transition cursor-pointer">السجلات</button>
+        <button data-tab="analytics" class="nav-tab px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap smooth-transition cursor-pointer">الإحصائيات</button>
+        <button data-tab="users" data-admin-only="true" class="nav-tab hidden px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap smooth-transition cursor-pointer">المستخدمون</button>
+        <button data-tab="branding" data-admin-only="true" class="nav-tab hidden px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap smooth-transition cursor-pointer">هوية النظام</button>
+        <button data-tab="audit" data-admin-only="true" class="nav-tab hidden px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap smooth-transition cursor-pointer">سجل التدقيق</button>
+        <button data-tab="backup" data-admin-only="true" class="nav-tab hidden px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 whitespace-nowrap smooth-transition cursor-pointer">النسخ الاحتياطي</button>
+      </nav>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-slate-100">
+          <p class="text-xs font-semibold text-slate-500">إجمالي الوثائق</p>
+          <p id="statTotal" class="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-slate-100">
+          <p class="text-xs font-semibold text-slate-500">سجلات عسكرية</p>
+          <p id="statMilitary" class="text-2xl sm:text-3xl font-extrabold text-indigo-600 mt-1">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-slate-100">
+          <p class="text-xs font-semibold text-slate-500">قريبة الانتهاء</p>
+          <p id="statExpiring" class="text-2xl sm:text-3xl font-extrabold text-amber-500 mt-1">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 sm:p-5 shadow-card border border-slate-100">
+          <p class="text-xs font-semibold text-slate-500">منتهية الصلاحية</p>
+          <p id="statExpired" class="text-2xl sm:text-3xl font-extrabold text-rose-600 mt-1">0</p>
+        </div>
+      </div>
+
+      <section id="tab-records" class="space-y-4">
+        <div class="bg-white rounded-2xl p-4 shadow-card border border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1">
+            <input id="searchQuery" type="search" aria-label="بحث بالاسم أو رقم الوثيقة" placeholder="بحث بالاسم أو رقم الوثيقة..."
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none" />
+            <input id="searchPhone" type="tel" aria-label="بحث برقم الجوال" placeholder="بحث برقم الجوال..."
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none" />
+            <select id="filterDocType" aria-label="تصفية حسب نوع الوثيقة"
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none">
+              <option value="">جميع الأنواع</option>
+              <option value="بطاقة شخصية قديمة">بطاقة شخصية قديمة</option>
+              <option value="بطاقة شخصية إلكترونية">بطاقة شخصية إلكترونية</option>
+              <option value="جواز سفر">جواز سفر</option>
+              <option value="بطاقة عسكرية">بطاقة عسكرية</option>
+            </select>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span id="activeStatFilterBadge" class="hidden px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold"></span>
+              <button id="resetFiltersBtn" type="button" class="hidden px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer">
+                إعادة ضبط الفلاتر
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
+              <button id="openAddModalBtn" data-write-only="true" type="button"
+                class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white text-sm font-bold shadow-sm shadow-indigo-600/20 smooth-transition cursor-pointer text-center">
+                + إضافة وثيقة
+              </button>
+              <button id="openScanModalBtn" data-write-only="true" type="button"
+                class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-sm font-bold shadow-sm shadow-emerald-600/20 smooth-transition cursor-pointer text-center">
+                مسح ضوئي
+              </button>
+              <button id="exportCsvBtn" type="button"
+                class="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200/80 text-slate-700 text-sm font-bold smooth-transition cursor-pointer text-center">
+                تصدير Excel
+              </button>
+              <label data-write-only="true" class="px-3.5 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-700 text-sm font-bold smooth-transition cursor-pointer text-center">
+                استيراد Excel
+                <input id="importCsvInput" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-card border border-slate-100 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-right border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
+                  <th class="py-3.5 px-4">الاسم الكامل</th>
+                  <th class="py-3.5 px-4">نوع الوثيقة</th>
+                <th data-status-th="1" class="py-3 px-4 text-right font-extrabold text-slate-700 whitespace-nowrap">الحالة</th>
+                  <th class="py-3.5 px-4">رقم الوثيقة</th>
+                  <th class="py-3.5 px-4">الجوال</th>
+                  <th class="py-3.5 px-4">الوجهة</th>
+                  <th class="py-3.5 px-4">الانتهاء</th>
+                  <th class="py-3.5 px-4 text-center">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody id="recordsTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-analytics" class="hidden space-y-4">
+        <div class="bg-white rounded-2xl p-6 shadow-card border border-slate-100">
+          <h3 class="text-base font-extrabold text-slate-800 mb-4">توزيع الوثائق حسب النوع</h3>
+          <div id="typeDistributionBars" class="space-y-4"></div>
+        </div>
+      </section>
+
+      <section id="tab-users" class="hidden space-y-4">
+        <div class="bg-white rounded-2xl p-5 shadow-card border border-slate-100">
+          <h3 class="text-base font-extrabold text-slate-800 mb-4">إضافة مستخدم جديد</h3>
+          <form id="addUserForm" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <input id="newUserFullName" type="text" required aria-label="الاسم الكامل للمستخدم" placeholder="الاسم الكامل"
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+            <input id="newUsername" type="text" required aria-label="اسم المستخدم" placeholder="اسم المستخدم"
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+            <input id="newUserPassword" type="password" required aria-label="كلمة المرور" placeholder="كلمة المرور"
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+            <select id="newUserRole" aria-label="الصلاحية"
+              class="px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white outline-none focus:border-indigo-600">
+              <option value="reader">قارئ</option>
+              <option value="writer">كاتب</option>
+              <option value="admin">مدير</option>
+            </select>
+            <button type="submit"
+              class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold cursor-pointer">
+              إضافة
+            </button>
+          </form>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-card border border-slate-100 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-right border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
+                  <th class="py-3.5 px-4">الاسم</th>
+                  <th class="py-3.5 px-4">اسم المستخدم</th>
+                  <th class="py-3.5 px-4">الصلاحية</th>
+                  <th class="py-3.5 px-4 text-center">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-branding" class="hidden">
+        <div class="bg-white rounded-2xl p-6 shadow-card border border-slate-100 max-w-2xl space-y-5">
+          <h3 class="text-base font-extrabold text-slate-800">تخصيص اسم وصورة النظام</h3>
+          <form id="brandingForm" class="space-y-4">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1.5">اسم النظام</label>
+              <input id="brandingSystemName" type="text" required placeholder="أدخل اسم النظام..."
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:border-indigo-600 outline-none" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1.5">صورة / شعار النظام</label>
+              <input id="brandingLogoFile" type="file" accept="image/*"
+                class="block w-full text-sm text-slate-600 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+            </div>
+            <div class="flex items-center gap-3 pt-2">
+              <button type="submit"
+                class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold cursor-pointer">
+                حفظ الهوية
+              </button>
+              <button id="resetBrandingBtn" type="button"
+                class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold cursor-pointer">
+                استعادة الافتراضي
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="tab-audit" class="hidden">
+<!-- === AUDIT_CLEAR_BTN_START === -->
+<div id="auditClearToolbar" class="flex items-center justify-end gap-2 my-2 px-2">
+  <button id="clearAuditLogBtn" type="button" data-admin-only="true" onclick="window.clearAuditLogManual && window.clearAuditLogManual()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow transition">
+    مسح سجل التدقيق
+  </button>
+</div>
+<!-- === AUDIT_CLEAR_BTN_END === -->
+        <div class="bg-white rounded-2xl shadow-card border border-slate-100 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-right border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
+                  <th class="py-3.5 px-4">الوقت</th>
+                  <th class="py-3.5 px-4">المستخدم</th>
+                  <th class="py-3.5 px-4">العملية</th>
+                  <th class="py-3.5 px-4">التفاصيل</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody" class="divide-y divide-slate-100 text-sm"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-backup" class="hidden">
+        <div class="bg-white rounded-2xl p-6 shadow-card border border-slate-100 max-w-2xl space-y-4">
+          <h3 class="text-base font-extrabold text-slate-800">النسخ الاحتياطي واستعادة قاعدة البيانات</h3>
+          <p class="text-sm text-slate-500">تصدير نسخة كاملة بصيغة JSON أو استعادة نسخة سابقة.</p>
+          <div class="flex flex-wrap items-center gap-3">
+            <button id="downloadBackupBtn" type="button"
+              class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold cursor-pointer">
+              تحميل نسخة احتياطية
+            </button>
+            <label class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold cursor-pointer">
+              استعادة نسخة JSON
+              <input id="restoreBackupInput" type="file" accept=".json" class="hidden" />
+            </label>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="recordModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-3xl p-6 sm:p-7 my-auto max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
+        <h3 id="recordModalTitle" class="text-lg font-extrabold text-slate-900">إضافة وثيقة</h3>
+        <button type="button" data-close-modal="recordModal" class="text-slate-400 hover:text-slate-700 text-xl font-bold cursor-pointer">×</button>
+      </div>
+
+      <form id="recordForm" class="space-y-4">
+        <input id="recordId" type="hidden" />
+
+        <div class="bg-slate-50 rounded-2xl p-4 border border-dashed border-slate-300 flex flex-col sm:flex-row items-center gap-4">
+          <img id="recordImagePreview" src="" alt="" class="hidden w-24 h-24 object-cover rounded-xl border border-slate-200" />
+          <div class="flex-1 w-full space-y-2">
+            <label class="block text-xs font-bold text-slate-600">صورة الوثيقة أو التقاطها بالكاميرا</label>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="openRecordCameraBtn" type="button"
+                class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer">
+                فتح الكاميرا
+              </button>
+              <input id="recordImageInput" type="file" accept="image/*"
+                class="block flex-1 text-xs text-slate-600 file:ml-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">الاسم الكامل *</label>
+            <input id="recFullName" type="text" required placeholder="مثال: أحمد محمد علي"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">نوع الهوية *</label>
+            <select id="recDocType" required class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white outline-none focus:border-indigo-600">
+              <option value="بطاقة شخصية إلكترونية">بطاقة شخصية إلكترونية</option>
+              <option value="بطاقة شخصية قديمة">بطاقة شخصية قديمة</option>
+              <option value="جواز سفر">جواز سفر</option>
+              <option value="بطاقة عسكرية">بطاقة عسكرية</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">رقم الهوية / الجواز *</label>
+            <input id="recDocNumber" type="text" required placeholder="رقم الهوية أو الجواز"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">تاريخ الميلاد</label>
+            <input id="recBirthDate" type="date" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">محل الميلاد</label>
+            <input id="recBirthPlace" type="text" placeholder="محل الميلاد"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">تاريخ الإصدار</label>
+            <input id="recIssueDate" type="date" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">تاريخ الانتهاء</label>
+            <input id="recExpiryDate" type="date" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">المهنة</label>
+            <input id="recProfession" type="text" placeholder="المهنة"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">رقم الجوال</label>
+            <input id="recPhone" type="tel" placeholder="مثال: 77xxxxxxx"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div class="sm:col-span-2 lg:col-span-3">
+            <label class="block text-xs font-bold text-slate-700 mb-1">السكن الحالي</label>
+            <input id="recAddress" type="text" placeholder="المدينة / الحي / الشارع"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">حالة العسكرية</label>
+            <select id="recMilitaryStatus" class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white outline-none focus:border-indigo-600">
+              <option value="مدني">مدني</option>
+              <option value="عسكري">عسكري</option>
+            </select>
+          </div>
+          <div id="militaryExtraFields" class="hidden sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">الرتبة العسكرية</label>
+              <input id="recMilitaryRank" type="text" placeholder="مثال: ملازم، رقيب..."
+                class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">الرقم العسكري</label>
+              <input id="recMilitaryNumber" type="text" placeholder="الرقم العسكري"
+                class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">مكان الوجهة</label>
+            <input id="recDestinationPlace" type="text" placeholder="مكان الوجهة"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 mb-1">سبب الوجهة</label>
+            <input id="recDestinationReason" type="text" placeholder="سبب الوجهة"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-600" />
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+          <button type="button" data-close-modal="recordModal" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold cursor-pointer">إلغاء</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold cursor-pointer">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="scanModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-xl p-6 space-y-4 my-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-base font-extrabold text-slate-900">مسح ضوئي واستخراج البيانات</h3>
+        <button type="button" data-close-modal="scanModal" class="text-slate-400 hover:text-slate-700 text-xl font-bold cursor-pointer">×</button>
+      </div>
+      <div class="space-y-2">
+        <label class="block text-xs font-bold text-slate-700">التقاط صورة بالكاميرا أو رفع صورة الوثيقة</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="openScanCameraBtn" type="button"
+            class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer">
+            فتح الكاميرا
+          </button>
+          <input id="scanFileInput" type="file" accept="image/*"
+            class="block flex-1 text-xs text-slate-600 file:ml-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:font-bold file:bg-emerald-50 file:text-emerald-700" />
+        </div>
+      </div>
+
+      <div id="liveCameraBox" class="hidden space-y-2 bg-slate-900 p-3 rounded-2xl">
+        <video id="liveCameraVideo" playsinline autoplay muted class="w-full max-h-60 object-cover rounded-xl bg-black"></video>
+        <div class="flex items-center justify-end gap-2">
+          <button id="stopCameraBtn" type="button" class="px-3 py-1.5 rounded-xl bg-slate-700 text-white text-xs font-bold cursor-pointer">إيقاف الكاميرا</button>
+          <button id="snapCameraBtn" type="button" class="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold cursor-pointer">التقاط الصورة</button>
+        </div>
+      </div>
+
+      <div id="scanCropBox" class="hidden space-y-2 bg-slate-900 p-3 rounded-2xl">
+        <div class="flex items-center justify-between text-xs text-slate-200">
+          <span>اسحب لتحديد جزء من البطاقة (مثل الاسم أو رقم الهوية)</span>
+          <button id="clearCropBtn" type="button" class="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold cursor-pointer">مسح التحديد</button>
+        </div>
+        <div class="relative w-full overflow-hidden rounded-xl bg-black flex justify-center">
+          <canvas id="scanCropCanvas" class="max-h-72 w-auto max-w-full touch-none cursor-crosshair"></canvas>
+        </div>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button id="scanFullImageBtn" type="button" class="px-3.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold cursor-pointer">قراءة البطاقة كاملة</button>
+          <button id="scanCroppedRegionBtn" type="button" class="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold cursor-pointer">قراءة الجزء المحدد</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1.5">النص المستخرج أو المنسوخ للمعالجة</label>
+        <textarea id="scanRawText" rows="5" placeholder="سيظهر النص المستخرج من الصورة هنا تلقائياً، أو يمكنك لصق/كتابة النص يدوياً..."
+          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-emerald-600"></textarea>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button type="button" data-close-modal="scanModal" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-bold cursor-pointer">إغلاق</button>
+        <button id="processScanBtn" type="button" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold cursor-pointer">استخراج ونقل للنموذج</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="viewModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-base font-extrabold text-slate-900">تفاصيل الوثيقة</h3>
+        <button type="button" data-close-modal="viewModal" class="text-slate-400 hover:text-slate-700 text-xl font-bold cursor-pointer">×</button>
+      </div>
+      <div id="viewModalBody" class="space-y-3 text-sm"></div>
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+        <button type="button" onclick="window.print()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold cursor-pointer">طباعة</button>
+        <button type="button" data-close-modal="viewModal" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold cursor-pointer">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ocr-engine.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const form = document.getElementById('loginForm');
+      if (!form) return;
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const username = document.getElementById('loginUsername')?.value?.trim() || '';
+        const password = document.getElementById('loginPassword')?.value || '';
+        try {
+          const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.user) {
+            alert(data.error || 'بيانات الدخول غير صحيحة');
+            return;
+          }
+          sessionStorage.setItem('idvault_session', JSON.stringify(data.user));
+          if (window.__idvaultLoginDone !== true) { document.getElementById("loginScreen")?.classList.add("hidden"); }
+          document.getElementById('appShell')?.classList.remove('hidden');
+          location.reload();
+        } catch (err) {
+          alert('تعذر الاتصال بالخادم: ' + err.message);
+        }
+      });
+    })();
+  </script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</body>
+</html>

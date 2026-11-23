@@ -1,0 +1,15 @@
+node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.env
+npm-debug.log*
