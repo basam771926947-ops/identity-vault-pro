@@ -100,7 +100,6 @@ window.__recordStatusMap = new Map();
   }
   window.showToast = showToast;
 
-  // دالة موحدة لتحميل أو مشاركة الملفات في المتصفح وتطبيق الأندرويد WebView
   async function saveOrShareFile(blob, filename, mimeType) {
     try {
       const file = new File([blob], filename, { type: mimeType });
@@ -131,7 +130,6 @@ window.__recordStatusMap = new Map();
       showToast(`تم حفظ الملف في التنزيلات (Downloads): ${filename}`, "success");
       return true;
     } catch {
-      // بديل Data URL لـ WebView
       const reader = new FileReader();
       reader.onload = () => {
         const a = document.createElement("a");
@@ -189,7 +187,6 @@ window.__recordStatusMap = new Map();
     const box = document.getElementById('liveCameraBox');
     const video = document.getElementById('liveCameraVideo');
 
-    // محاولة استخدام كاميرا Capacitor الأصلية إذا كانت متوفرة
     try {
       const capCam = window.Capacitor?.Plugins?.Camera;
       if (capCam && typeof capCam.getPhoto === 'function') {
@@ -403,18 +400,44 @@ window.__recordStatusMap = new Map();
     document.getElementById('currentRoleBadge').textContent = roleLabels[user.role] || user.role;
   }
 
+  window.__parseLooseDate = function(val) {
+    if (!val) return null;
+    if (val instanceof Date && !isNaN(val.getTime())) return val;
+    const s = String(val).trim();
+    if (!s) return null;
+    const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) {
+      const dt = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  };
+
   function getExpiryStatus(expiryDate) {
     if (!expiryDate) return { label: 'غير محدد', cls: 'bg-slate-100 text-slate-600' };
+    const exp = window.__parseLooseDate(expiryDate);
+    if (!exp) return { label: 'غير محدد', cls: 'bg-slate-100 text-slate-600' };
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const exp = new Date(expiryDate);
+    exp.setHours(0, 0, 0, 0);
     const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) return { label: 'منتهية', cls: 'bg-rose-100 text-rose-700' };
     if (diffDays <= 30) return { label: `تنتهي خلال ${diffDays} يوم`, cls: 'bg-amber-100 text-amber-800' };
     return { label: 'سارية', cls: 'bg-emerald-100 text-emerald-700' };
   }
 
-  // دالة موحدة للتحقق هل السجل "عسكري بهوية مدنية"
+  window.__isRecordMilitary = function(rec) {
+    try {
+      if (!rec) return false;
+      const st = String(rec.military_status || "").trim();
+      const dt = String(rec.doc_type || "").trim();
+      return st === "عسكري" || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
+    } catch {
+      return false;
+    }
+  };
+
   window.__isRecordMilitaryCivil = function(r) {
     if (!r || typeof r !== 'object') return false;
     const st = String(r.military_status || '').trim();
@@ -422,6 +445,20 @@ window.__recordStatusMap = new Map();
     const isMil = st === 'عسكري' || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
     const hasCivilDoc = dt && !/عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
     return isMil && hasCivilDoc;
+  };
+
+  window.__getMilitaryStatusBadgeHtml = function(rec, isMil, docTypeText) {
+    try {
+      if (!isMil) {
+        return "<span style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9999px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;font-weight:700;font-size:12px;'><span style='width:8px;height:8px;border-radius:9999px;background:#94a3b8;display:inline-block;'></span>مدني</span>";
+      }
+      const dt = String((rec && rec.doc_type) || docTypeText || "").trim();
+      const hasCivilDoc = dt && !/عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
+      const label = hasCivilDoc ? "عسكري · هوية مدنية" : "عسكري";
+      return "<span style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9999px;border:1.5px solid #e11d48;background:#ffe4e6;color:#be123c;font-weight:800;font-size:12px;'><span style='width:8px;height:8px;border-radius:9999px;background:#e11d48;display:inline-block;'></span>" + label + "</span>";
+    } catch {
+      return "<span>" + (isMil ? "عسكري" : "مدني") + "</span>";
+    }
   };
 
   window.__getFilteredRecordsList = function(sourceRecords) {
@@ -441,17 +478,21 @@ window.__recordStatusMap = new Map();
     return records.filter((r) => {
       const mode = window.__activeStatMode || "all";
       if (mode === "military") {
-        if (r.military_status !== "عسكري") return false;
+        if (!window.__isRecordMilitary(r)) return false;
       } else if (mode === "expiring") {
-        if (!r.expiry_date) return false;
-        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
+        const exp = window.__parseLooseDate(r.expiry_date);
+        if (!exp) return false;
+        exp.setHours(0, 0, 0, 0);
+        const diff = Math.ceil((exp - __nowRef) / (1000 * 60 * 60 * 24));
         if (!(diff >= 0 && diff <= 30)) return false;
       } else if (mode === "expired") {
-        if (!r.expiry_date) return false;
-        const diff = Math.ceil((new Date(r.expiry_date) - __nowRef) / (1000 * 60 * 60 * 24));
+        const exp = window.__parseLooseDate(r.expiry_date);
+        if (!exp) return false;
+        exp.setHours(0, 0, 0, 0);
+        const diff = Math.ceil((exp - __nowRef) / (1000 * 60 * 60 * 24));
         if (!(diff < 0)) return false;
       }
-      if (window.__militaryFilterActive && r.military_status !== "عسكري") {
+      if (window.__militaryFilterActive && !window.__isRecordMilitary(r)) {
         return false;
       }
       if (isQuickMilCivil || isDropdownMilCivil) {
@@ -478,17 +519,19 @@ window.__recordStatusMap = new Map();
 
     window.__recordStatusMap.clear();
     for (const r of records) {
-      const isMil = r.military_status === 'عسكري';
+      const isMil = window.__isRecordMilitary(r);
       if (isMil) militaryCount++;
       let expState = "valid";
-      if (r.expiry_date) {
-        const diff = Math.ceil((new Date(r.expiry_date) - now) / (1000 * 60 * 60 * 24));
+      const exp = window.__parseLooseDate(r.expiry_date);
+      if (exp) {
+        exp.setHours(0, 0, 0, 0);
+        const diff = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
         if (diff < 0) { expiredCount++; expState = "expired"; }
         else if (diff <= 30) { expiringCount++; expState = "expiring"; }
       }
       const keyByNum = String(r.doc_number || "").trim();
       const keyByName = String(r.full_name || "").trim();
-      const info = { isMilitary: isMil, militaryStatus: r.military_status || "مدني", expState };
+      const info = { isMilitary: isMil, militaryStatus: isMil ? "عسكري" : (r.military_status || "مدني"), expState };
       if (keyByNum) window.__recordStatusMap.set("num:" + keyByNum, info);
       if (keyByName) window.__recordStatusMap.set("name:" + keyByName, info);
     }
@@ -532,6 +575,11 @@ window.__recordStatusMap = new Map();
       if (__rec && __rec.doc_number) window.__recordsByLookup.byDoc[String(__rec.doc_number).trim()] = __rec;
       if (__rec && __rec.full_name) window.__recordsByLookup.byName[String(__rec.full_name).trim()] = __rec;
     }
+
+    if (typeof window.__renderSingleStatusColAndFilter === "function") {
+      window.__renderSingleStatusColAndFilter();
+    }
+
     renderAnalytics(records);
     if (currentUser.role === 'admin') {
       await renderUsers();
@@ -701,6 +749,9 @@ window.__recordStatusMap = new Map();
         const img = document.getElementById('recordImagePreview');
         img.src = r.doc_image_data;
         img.classList.remove('hidden');
+      }
+      if (typeof window.__resetMilitaryLockState === "function") {
+        window.__resetMilitaryLockState();
       }
       openModal('recordModal');
     },
@@ -877,20 +928,15 @@ window.__recordStatusMap = new Map();
 
     document.getElementById('openAddModalBtn').addEventListener('click', () => {
       resetRecordForm();
+      if (typeof window.__resetMilitaryLockState === "function") {
+        window.__resetMilitaryLockState();
+      }
       openModal('recordModal');
     });
 
-    document.getElementById('openRecordCameraBtn')?.addEventListener('click', () => {
-      startLiveCamera('record');
-    });
-
-    document.getElementById('openScanCameraBtn')?.addEventListener('click', () => {
-      startLiveCamera('scan');
-    });
-
-    document.getElementById('stopCameraBtn')?.addEventListener('click', () => {
-      stopLiveCamera();
-    });
+    document.getElementById('openRecordCameraBtn')?.addEventListener('click', () => startLiveCamera('record'));
+    document.getElementById('openScanCameraBtn')?.addEventListener('click', () => startLiveCamera('scan'));
+    document.getElementById('stopCameraBtn')?.addEventListener('click', () => stopLiveCamera());
 
     document.getElementById('snapCameraBtn')?.addEventListener('click', async () => {
       const video = document.getElementById('liveCameraVideo');
@@ -1039,9 +1085,7 @@ window.__recordStatusMap = new Map();
 
     document.getElementById('processScanBtn').addEventListener('click', async () => {
       const raw = document.getElementById('scanRawText').value;
-      if (SilentOCREngine.refreshMemory) {
-        await SilentOCREngine.refreshMemory();
-      }
+      if (SilentOCREngine.refreshMemory) await SilentOCREngine.refreshMemory();
       const extracted = SilentOCREngine.extractFields(raw);
       if (SilentOCREngine.setLastScanContext) SilentOCREngine.setLastScanContext(raw, extracted);
       const savedImg = tempRecordImage;
@@ -1175,7 +1219,7 @@ window.__recordStatusMap = new Map();
             parsedRows.push(row);
           }
         }
-      } catch (err) {
+      } catch {
         showToast("تعذر قراءة ملف Excel أو CSV", "error");
         e.target.value = "";
         return;
@@ -1327,180 +1371,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentStatFilter = null;
 
-  const styleId = "directStatFilterMotionStyle";
-  if (!document.getElementById(styleId)) {
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      @keyframes statCardBounce {
-        0% { transform: scale(1); }
-        40% { transform: scale(1.04) translateY(-2px); }
-        100% { transform: scale(1.015) translateY(-1px); }
-      }
-      .stat-box-btn {
-        cursor: pointer;
-        user-select: none;
-        transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
-      }
-      .stat-box-btn:active {
-        transform: scale(0.96);
-      }
-      .stat-box-selected {
-        animation: statCardBounce 0.3s ease forwards;
-        transform: scale(1.015) translateY(-1px);
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
   const statsMap = [
-    { id: "statTotal", key: null, cls: ["ring-2", "ring-slate-800", "border-slate-800", "bg-slate-50", "shadow-lg", "stat-box-selected"] },
-    { id: "statMilitary", key: "military", cls: ["ring-2", "ring-indigo-600", "border-indigo-600", "bg-indigo-50/70", "shadow-lg", "shadow-indigo-600/20", "stat-box-selected"] },
-    { id: "statExpiring", key: "expiring", cls: ["ring-2", "ring-amber-500", "border-amber-500", "bg-amber-50/70", "shadow-lg", "shadow-amber-500/20", "stat-box-selected"] },
-    { id: "statExpired", key: "expired", cls: ["ring-2", "ring-rose-600", "border-rose-600", "bg-rose-50/70", "shadow-lg", "shadow-rose-600/20", "stat-box-selected"] }
+    { id: "statTotal", key: null, cls: ["ring-2", "ring-slate-800", "border-slate-800", "bg-slate-50", "shadow-lg", "stat-card-active"] },
+    { id: "statMilitary", key: "military", cls: ["ring-2", "ring-indigo-600", "border-indigo-600", "bg-indigo-50/70", "shadow-lg", "shadow-indigo-600/20", "stat-card-active"] },
+    { id: "statExpiring", key: "expiring", cls: ["ring-2", "ring-amber-500", "border-amber-500", "bg-amber-50/70", "shadow-lg", "shadow-amber-500/20", "stat-card-active"] },
+    { id: "statExpired", key: "expired", cls: ["ring-2", "ring-rose-600", "border-rose-600", "bg-rose-50/70", "shadow-lg", "shadow-rose-600/20", "stat-card-active"] }
   ];
 
   const allCls = Array.from(new Set(statsMap.flatMap((s) => s.cls)));
-  let isFilteringRows = false;
-
-  window.__parseLooseDate = function(val) {
-    if (!val) return null;
-    if (val instanceof Date && !isNaN(val.getTime())) return val;
-    const s = String(val).trim();
-    if (!s) return null;
-    const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (dmy) {
-      const dt = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
-      return isNaN(dt.getTime()) ? null : dt;
-    }
-    const dt = new Date(s);
-    return isNaN(dt.getTime()) ? null : dt;
-  };
-
-  window.__evalExpiryMatch = function(tr, kind) {
-    const tds = Array.from(tr.querySelectorAll("td"));
-    const nameKey = (tds[0]?.textContent || "").replace(/نسخ/g, "").trim();
-    const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
-    const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-    const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
-
-    if (rec && rec.expiry_date) {
-      const exp = window.__parseLooseDate(rec.expiry_date);
-      if (exp) {
-        const now = new Date();
-        now.setHours(0, 0, 0, 0);
-        exp.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-        if (kind === "expired" && diffDays < 0) return true;
-        if (kind === "expiring" && diffDays >= 0 && diffDays <= 30) return true;
-      }
-    }
-
-    const badgeSpans = Array.from(tr.querySelectorAll("span")).filter((sp) => {
-      const t = (sp.textContent || "").trim();
-      return t.includes("منته") || t.includes("تنتهي خلال") || t.includes("ينتهي خلال") || t.includes("سارية") || t.includes("ساري");
-    });
-    const combinedBadgeText = badgeSpans.map((b) => (b.textContent || "").trim()).join(" ");
-
-    if (kind === "expired") {
-      return /منته(?:ية|ي|اة)?/.test(combinedBadgeText) || /منته(?:ية|ي|اة)?/.test(tr.textContent || "");
-    }
-    if (kind === "expiring") {
-      return /(تنتهي خلال|ينتهي خلال|قريب)/.test(combinedBadgeText);
-    }
-    return false;
-  };
-
-  window.__isRecordMilitary = function(rec) {
-    try {
-      if (!rec) return false;
-      const st = String(rec.military_status || "").trim();
-      const dt = String(rec.doc_type || "").trim();
-      return st === "عسكري" || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
-    } catch {
-      return false;
-    }
-  };
-
-  window.__getMilitaryStatusBadgeHtml = function(rec, isMil, docTypeText) {
-    try {
-      if (!isMil) {
-        return "<span style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9999px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;font-weight:700;font-size:12px;'><span style='width:8px;height:8px;border-radius:9999px;background:#94a3b8;display:inline-block;'></span>مدني</span>";
-      }
-      const dt = String((rec && rec.doc_type) || docTypeText || "").trim();
-      const hasCivilDoc = dt && !/عسكري|عسكرية|جيش|أمن|شرطة/i.test(dt);
-      const label = hasCivilDoc ? "عسكري · هوية مدنية" : "عسكري";
-      return "<span style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9999px;border:1.5px solid #e11d48;background:#ffe4e6;color:#be123c;font-weight:800;font-size:12px;'><span style='width:8px;height:8px;border-radius:9999px;background:#e11d48;display:inline-block;'></span>" + label + "</span>";
-    } catch {
-      return "<span>" + (isMil ? "عسكري" : "مدني") + "</span>";
-    }
-  };
-
-  const filterRowsNow = () => {
-    if (isFilteringRows) return;
-    isFilteringRows = true;
-    try {
-      const tbody = document.getElementById("recordsTableBody");
-      if (!tbody) return;
-
-      tbody.querySelectorAll("tr[data-stat-empty-row]").forEach((el) => el.remove());
-      const rows = Array.from(tbody.querySelectorAll("tr"));
-      if (!rows.length) return;
-
-      if (!currentStatFilter) {
-        rows.forEach((tr) => { tr.style.display = ""; });
-        return;
-      }
-
-      let visibleCount = 0;
-      rows.forEach((tr) => {
-        const tds = Array.from(tr.querySelectorAll("td"));
-        if (tds.length < 6) {
-          tr.style.display = "";
-          return;
-        }
-
-        const docTypeText = (tds[1]?.textContent || "").trim();
-        const fullRowText = (tr.textContent || "").trim();
-
-        let ok = false;
-        if (currentStatFilter === "military") {
-          const nameKey = (tds[0]?.textContent || "").replace(/نسخ/g, "").trim();
-          const docKey = (tds[2]?.textContent || "").replace(/نسخ/g, "").trim();
-          const lookup = window.__recordsByLookup || { byDoc: {}, byName: {} };
-          const rec = (docKey && lookup.byDoc[docKey]) || (nameKey && lookup.byName[nameKey]) || null;
-          ok = window.__isRecordMilitary(rec) || /عسكري|عسكرية|جيش|أمن|شرطة/i.test(docTypeText) || /عسكري/i.test(fullRowText);
-        } else if (currentStatFilter === "expiring") {
-          ok = window.__evalExpiryMatch(tr, "expiring");
-        } else if (currentStatFilter === "expired") {
-          ok = window.__evalExpiryMatch(tr, "expired");
-        }
-
-        tr.style.display = ok ? "" : "none";
-        if (ok) visibleCount++;
-      });
-
-      if (visibleCount === 0) {
-        const emptyTr = document.createElement("tr");
-        emptyTr.dataset.statEmptyRow = "1";
-        emptyTr.innerHTML = `<td colspan="7" class="py-8 text-center text-slate-400 font-semibold">لا توجد سجلات مطابقة لهذا الفلتر</td>`;
-        tbody.appendChild(emptyTr);
-      }
-
-      if (typeof attachQuickCopyToRows === "function") {
-        attachQuickCopyToRows();
-      }
-    } finally {
-      setTimeout(() => { isFilteringRows = false; }, 50);
-    }
-  };
 
   const paintStatCards = () => {
     statsMap.forEach((item) => {
       const numEl = document.getElementById(item.id);
       const card = numEl ? (numEl.closest("div.rounded-2xl") || numEl.parentElement) : null;
       if (!card) return;
-      card.classList.add("stat-box-btn");
+      card.classList.add("stat-card-interactive");
       card.classList.remove(...allCls);
 
       let tag = card.querySelector("[data-stat-active-tag]");
@@ -1541,6 +1426,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  const applyFilterState = async () => {
+    window.__activeStatMode = currentStatFilter || "all";
+    paintStatCards();
+    if (typeof window.__renderAllRecords === "function") {
+      await window.__renderAllRecords();
+    }
+  };
+
   const wireCards = () => {
     let wiredCount = 0;
     statsMap.forEach((item) => {
@@ -1550,14 +1443,13 @@ document.addEventListener("DOMContentLoaded", () => {
       wiredCount++;
       if (card.dataset.statWired === "1") return;
       card.dataset.statWired = "1";
-      card.addEventListener("click", () => {
+      card.addEventListener("click", async () => {
         if (item.key === null) {
           currentStatFilter = null;
         } else {
           currentStatFilter = currentStatFilter === item.key ? null : item.key;
         }
-        paintStatCards();
-        filterRowsNow();
+        await applyFilterState();
         if (typeof showToast === "function") {
           showToast(currentStatFilter ? "تم تطبيق الفلترة على الجدول" : "تم إلغاء فلتر البطاقة", "info");
         }
@@ -1570,10 +1462,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const resetBtn = document.getElementById("resetFiltersBtn");
   if (resetBtn && resetBtn.dataset.statResetWired !== "1") {
     resetBtn.dataset.statResetWired = "1";
-    resetBtn.addEventListener("click", () => {
+    resetBtn.addEventListener("click", async () => {
       currentStatFilter = null;
-      paintStatCards();
-      filterRowsNow();
+      const quickBtn = document.getElementById("quickFilterMilCivilBtn");
+      if (quickBtn) quickBtn.dataset.active = "0";
+      const typeSel = document.getElementById("filterDocType");
+      if (typeSel && typeSel.value === "__mil_civil_doc__") typeSel.value = "";
+      await applyFilterState();
     });
   }
 
@@ -1685,7 +1580,6 @@ window.__checkDuplicateBeforeSave = async function(payload, ignoreId) {
 
     const normNewName = window.__normalizePersonName(payload && payload.full_name);
     const cleanNewDoc = String((payload && payload.doc_number) || "").trim().toLowerCase();
-
     const others = existing.filter((item) => !ignoreId || String(item.id) !== String(ignoreId));
 
     if (cleanNewDoc) {
@@ -1719,7 +1613,6 @@ window.__checkDuplicateBeforeSave = async function(payload, ignoreId) {
   }
 };
 
-window.__dupSubmitGuardInstalled = true;
 document.addEventListener("submit", async (ev) => {
   const form = ev.target;
   if (!form || form.id !== "recordForm") return;
@@ -1806,10 +1699,7 @@ document.addEventListener("change", (e) => {
   }
 }, true);
 
-/* === ALL_SEVEN_IMPROVEMENTS_START === */
 (function() {
-  window.__savedActiveStatFilter = window.__savedActiveStatFilter || "";
-
   function ensureCivilDocMilitaryFilterUi() {
     const typeSel = document.getElementById("filterDocType");
     if (typeSel && !typeSel.querySelector("option[value='__mil_civil_doc__']")) {
@@ -1930,17 +1820,6 @@ document.addEventListener("change", (e) => {
     exportBtn.insertAdjacentElement("afterend", btn);
   }
 
-  function updateExpiryStatsAlertBadge() {
-    const statCards = Array.from(document.querySelectorAll("[data-stat-filter], .stat-card, [onclick*='expired']"));
-    const expiredCard = statCards.find((el) => /expired/.test((el.getAttribute("data-stat-filter") || el.getAttribute("onclick") || "")));
-    if (expiredCard && !document.getElementById("expiredUrgentPulseDot")) {
-      const dot = document.createElement("span");
-      dot.id = "expiredUrgentPulseDot";
-      dot.className = "inline-block w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping mr-1.5 align-middle";
-      expiredCard.prepend(dot);
-    }
-  }
-
   document.addEventListener("input", (e) => {
     if (e.target && e.target.id === "recFullName") renderInlineNameAlert();
   }, true);
@@ -1952,8 +1831,6 @@ document.addEventListener("change", (e) => {
       window.__resetMilitaryLockState();
       setTimeout(renderInlineNameAlert, 80);
     }
-    const statEl = t.closest("[data-stat-filter]");
-    if (statEl) window.__savedActiveStatFilter = statEl.getAttribute("data-stat-filter") || "";
   }, true);
 
   document.addEventListener("submit", (e) => {
@@ -1975,15 +1852,12 @@ document.addEventListener("change", (e) => {
   const runUiEnhancements = () => {
     ensureCivilDocMilitaryFilterUi();
     injectFilteredExportButton();
-    updateExpiryStatsAlertBadge();
   };
 
   document.addEventListener("DOMContentLoaded", runUiEnhancements);
   setTimeout(runUiEnhancements, 400);
 })();
-/* === ALL_SEVEN_IMPROVEMENTS_END === */
 
-/* === CONFIRM_DELETE_EDIT_START === */
 (function() {
   function findRecordMeta(id, fallbackText) {
     const list = Array.isArray(window.__allIdentityRecords) ? window.__allIdentityRecords : [];
@@ -2038,22 +1912,6 @@ document.addEventListener("change", (e) => {
     }
   }
 
-  const wrapAppActionsDelete = () => {
-    if (typeof AppActions !== "undefined" && typeof AppActions.deleteRecord === "function" && !AppActions.deleteRecord.__guarded) {
-      const origDelRec = AppActions.deleteRecord.bind(AppActions);
-      const guardedDelRec = async function(id) {
-        const meta = findRecordMeta(id, "");
-        if (!askConfirmAction("delete", meta)) return;
-        return await origDelRec(id);
-      };
-      guardedDelRec.__guarded = true;
-      AppActions.deleteRecord = guardedDelRec;
-    }
-  };
-  wrapAppActionsDelete();
-  document.addEventListener("DOMContentLoaded", wrapAppActionsDelete);
-  setTimeout(wrapAppActionsDelete, 500);
-
   document.addEventListener("submit", (e) => {
     const form = e.target;
     if (!form || form.id !== "recordForm") return;
@@ -2076,9 +1934,7 @@ document.addEventListener("change", (e) => {
     setTimeout(() => { if (form) form.dataset.editConfirmedOnce = ""; }, 600);
   }, true);
 })();
-/* === CONFIRM_DELETE_EDIT_END === */
 
-/* === ADMIN_ONLY_PERMISSIONS_START === */
 (function() {
   function getCurrentUserRole() {
     try {
@@ -2187,9 +2043,7 @@ document.addEventListener("change", (e) => {
   document.addEventListener("DOMContentLoaded", syncAdminVisibility);
   setInterval(syncAdminVisibility, 600);
 })();
-/* === ADMIN_ONLY_PERMISSIONS_END === */
 
-/* === SESSION_TIMEOUT_GUARD_START === */
 (function() {
   const MAX_IDLE_MS = 12 * 60 * 60 * 1000;
   const LAST_ACTIVE_KEY = "idvault_last_active_ts";
@@ -2267,9 +2121,7 @@ document.addEventListener("change", (e) => {
   document.addEventListener("click", touchActive, true);
   document.addEventListener("keydown", touchActive, true);
 })();
-/* === SESSION_TIMEOUT_GUARD_END === */
 
-/* === AUDIT_LOG_MANAGER_START === */
 (function() {
   const RETENTION_DAYS = 30;
   const AUTO_CHECK_MS = 6 * 60 * 60 * 1000;
@@ -2345,9 +2197,7 @@ document.addEventListener("change", (e) => {
   document.addEventListener("click", () => setTimeout(syncAuditButtonVisibility, 150), true);
   setInterval(runPeriodicAuditCleanup, AUTO_CHECK_MS);
 })();
-/* === AUDIT_LOG_MANAGER_END === */
 
-/* === PREVENT_DOUBLE_LOGIN_START === */
 (function() {
   let lastLoginSubmitTs = 0;
   document.addEventListener("submit", (e) => {
@@ -2362,9 +2212,7 @@ document.addEventListener("change", (e) => {
     lastLoginSubmitTs = now;
   }, true);
 })();
-/* === PREVENT_DOUBLE_LOGIN_END === */
 
-/* === UNIFIED_LOGIN_SCREEN_SYNC_START === */
 (function() {
   function hasStoredSession() {
     try {
@@ -2392,4 +2240,3 @@ document.addEventListener("change", (e) => {
   window.addEventListener("load", syncLoginVisibility);
   document.addEventListener("submit", () => setTimeout(syncLoginVisibility, 60), true);
 })();
-/* === UNIFIED_LOGIN_SCREEN_SYNC_END === */
