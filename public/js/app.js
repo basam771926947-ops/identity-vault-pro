@@ -100,23 +100,34 @@ window.__recordStatusMap = new Map();
   }
   window.showToast = showToast;
 
-  async function saveOrShareFile(blob, filename, mimeType) {
-    try {
-      const file = new File([blob], filename, { type: mimeType });
-      if (navigator.canShare && navigator.canShare({ files: [file] }) && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
-        await navigator.share({
-          files: [file],
-          title: filename
-        });
-        showToast(`تم تجهيز ومشاركة الملف: ${filename}`, "success");
-        return true;
-      }
-    } catch (shareErr) {
-      if (shareErr && shareErr.name === "AbortError") return false;
+  async function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("تعذر قراءة بيانات الملف"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function saveExportToServer(blob, filename) {
+    const base64Data = await blobToBase64(blob);
+    const res = await fetch(`${window.API_BASE_URL || ""}/api/save-export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, base64Data })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error((data && data.error) || "فشل الحفظ على الخادم");
     }
+    return data.savedPath;
+  }
+
+  async function saveOrShareFile(blob, filename, mimeType = "application/octet-stream") {
+    const typedBlob = blob instanceof Blob ? blob : new Blob([blob], { type: mimeType });
 
     try {
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(typedBlob);
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
@@ -126,22 +137,16 @@ window.__recordStatusMap = new Map();
       setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-      }, 1500);
-      showToast(`تم حفظ الملف في التنزيلات (Downloads): ${filename}`, "success");
+      }, 4000);
+    } catch (_) {}
+
+    try {
+      const savedPath = await saveExportToServer(typedBlob, filename);
+      showToast(`تم حفظ الملف على الخادم: ${savedPath}`, "success");
       return true;
-    } catch {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const a = document.createElement("a");
-        a.href = reader.result;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast(`تم تنزيل الملف: ${filename}`, "success");
-      };
-      reader.readAsDataURL(blob);
-      return true;
+    } catch (err) {
+      showToast(`تعذر حفظ الملف: ${err.message}`, "error");
+      return false;
     }
   }
   window.__saveOrShareFile = saveOrShareFile;
