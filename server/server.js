@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const dbModule = require('./db');
@@ -5,9 +6,38 @@ const dbModule = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const EXPORTS_DIR = path.join(__dirname, '..', 'exports');
 
-app.use(express.json({ limit: '20mb' }));
+if (!fs.existsSync(EXPORTS_DIR)) {
+  fs.mkdirSync(EXPORTS_DIR, { recursive: true });
+}
+
+app.use(express.json({ limit: '25mb' }));
 app.use(express.static(PUBLIC_DIR));
+
+app.post('/api/save-export', (req, res) => {
+  try {
+    const rawName = path.basename(String((req.body && req.body.filename) || ''));
+    const safeName = rawName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const base64Data = String((req.body && req.body.base64Data) || '').replace(/^data:.*;base64,/, '');
+
+    if (!safeName || !base64Data) {
+      return res.status(400).json({ ok: false, error: 'اسم الملف أو البيانات مفقودة' });
+    }
+
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (!buffer.length) {
+      return res.status(400).json({ ok: false, error: 'بيانات الملف فارغة' });
+    }
+
+    const targetPath = path.join(EXPORTS_DIR, safeName);
+    fs.writeFileSync(targetPath, buffer);
+
+    return res.json({ ok: true, savedPath: `exports/${safeName}` });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err && err.message ? err.message : 'فشل حفظ الملف على الخادم' });
+  }
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
@@ -161,29 +191,29 @@ const _auditDb = require('./db');
 app.post('/api/audit', (req, res) => {
   try {
     const b = req.body || {};
-    const actor = String(b.actor || b.username || "admin");
-    const actionType = String(b.action_type || b.actionType || b.action || "ACTION");
-    const details = String(b.details || "");
-    if (typeof _auditDb.addAudit === "function") {
+    const actor = String(b.actor || b.username || 'admin');
+    const actionType = String(b.action_type || b.actionType || b.action || 'ACTION');
+    const details = String(b.details || '');
+    if (typeof _auditDb.addAudit === 'function') {
       _auditDb.addAudit(actor, actionType, details);
     }
     return res.json({ ok: true });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err && err.message ? err.message : "Audit error" });
+    return res.status(500).json({ ok: false, error: err && err.message ? err.message : 'Audit error' });
   }
 });
 
 app.post('/api/logout', (req, res) => {
   try {
-    const actor = (req.body && (req.body.actor || req.body.username)) || "admin";
-    if (typeof _auditDb.logLogout === "function") {
+    const actor = (req.body && (req.body.actor || req.body.username)) || 'admin';
+    if (typeof _auditDb.logLogout === 'function') {
       _auditDb.logLogout(actor);
-    } else if (typeof _auditDb.addAudit === "function") {
-      _auditDb.addAudit(actor, "LOGOUT", `تسجيل خروج المستخدم ${actor}`);
+    } else if (typeof _auditDb.addAudit === 'function') {
+      _auditDb.addAudit(actor, 'LOGOUT', `تسجيل خروج المستخدم ${actor}`);
     }
     return res.json({ ok: true });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err && err.message ? err.message : "Logout error" });
+    return res.status(500).json({ ok: false, error: err && err.message ? err.message : 'Logout error' });
   }
 });
 // === AUDIT_POST_ROUTE_END ===
@@ -199,18 +229,18 @@ const { clearAuditLogs: _clearAuditLogs } = require('./db');
 app.delete('/api/audit', (req, res) => {
   try {
     const days = req.query && (req.query.olderThanDays || req.query.days);
-    const ok = typeof _clearAuditLogs === "function" ? _clearAuditLogs(days ? Number(days) : null) : false;
+    const ok = typeof _clearAuditLogs === 'function' ? _clearAuditLogs(days ? Number(days) : null) : false;
     if (!ok) {
-      return res.status(500).json({ ok: false, error: "clearAuditLogs failed" });
+      return res.status(500).json({ ok: false, error: 'clearAuditLogs failed' });
     }
     return res.json({ ok: true });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err && err.message ? err.message : "Server error" });
+    return res.status(500).json({ ok: false, error: err && err.message ? err.message : 'Server error' });
   }
 });
 // === AUDIT_DELETE_ROUTE_END ===
 
-app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 })();
