@@ -3,7 +3,7 @@
   "appName": "Identity Vault Pro",
   "webDir": "public",
   "server": {
-    "url": "http://177.77.10.25:3000",
+    "url": "http://localhost:3000",
     "cleartext": true
   }
 }
